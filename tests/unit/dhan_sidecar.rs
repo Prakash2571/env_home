@@ -129,3 +129,20 @@ fn a_code_is_sent_only_with_enough_life_left_and_never_twice() {
     );
     assert_eq!(wait_for_fresh_code(Some(step_of(start) - 1), start, 25), 0);
 }
+
+#[test]
+fn page_text_in_an_error_is_clipped_and_urls_lose_their_queries() {
+    let raw = format!(
+        "no tokenId reached /dhan/callback; last url https://auth.dhan.co/login/consentApp-login?consentAppId=secret-1 \
+         page {}",
+        "Welcome   Ramesh ".repeat(40)
+    );
+    let clipped = clip_detail(&raw, MAX_DETAIL_CHARS);
+    assert!(
+        !clipped.contains("secret-1"),
+        "the consent ID never reaches Telegram or the dashboard"
+    );
+    assert!(clipped.contains("https://auth.dhan.co/login/consentApp-login"));
+    assert!(clipped.chars().count() <= MAX_DETAIL_CHARS);
+    assert!(!clipped.contains("  "), "whitespace is collapsed");
+}

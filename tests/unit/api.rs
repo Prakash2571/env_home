@@ -40,6 +40,7 @@ async fn harness(api: ApiPolicy, admin: AdminPolicy, sidecar: Option<&str>) -> H
     );
     tokio::spawn(scheduler.run());
     let context = Arc::new(AppContext {
+        admin: admin.clone(),
         running: Some(Running {
             engine: Arc::clone(&engine),
             scheduler: handle,
@@ -124,6 +125,7 @@ async fn an_unconfigured_service_stays_up_and_says_what_is_missing() {
     let context = Arc::new(crate::app::unconfigured(
         vec!["CBL_ACCOUNTS names no account".into()],
         7,
+        access_required(),
     ));
     let router = router(context, std::path::Path::new("/nonexistent"));
     let (status, headers, body) = call(
@@ -145,9 +147,22 @@ async fn an_unconfigured_service_stays_up_and_says_what_is_missing() {
             .contains("frame-ancestors 'none'")
     );
 
-    let (_, _, state) = call(
+    let (status, _, _) = call(
         &router,
         Request::get("/api/state").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "even unconfigured, the state names variables, so it needs the Access identity"
+    );
+    let (_, _, state) = call(
+        &router,
+        Request::get("/api/state")
+            .header("cf-access-authenticated-user-email", EMAIL)
+            .body(Body::empty())
+            .unwrap(),
     )
     .await;
     assert_eq!(state["configured"], false);
@@ -592,7 +607,7 @@ async fn the_built_console_is_served_with_a_spa_fallback() {
         "<!doctype html><title>console</title>",
     )
     .unwrap();
-    let context = Arc::new(crate::app::unconfigured(Vec::new(), 0));
+    let context = Arc::new(crate::app::unconfigured(Vec::new(), 0, access_required()));
     let router = router(context, &dir);
     let (status, _, body) = call(
         &router,

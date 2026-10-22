@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 
+import { consentHosts, refusal } from "./guard.mjs";
 import { runLogin } from "./login.mjs";
 import { reapChromium } from "./reap.mjs";
 
@@ -7,6 +8,7 @@ const PORT = Number(process.env.PORT || 8090);
 const ADDRESS = process.env.ADDRESS || "0.0.0.0";
 const MAX_BODY_BYTES = 8192;
 const REQUIRED = ["consentUrl", "redirectUrl", "accountId", "totp", "pin"];
+const CONSENT_HOSTS = consentHosts(process.env.CONSENT_HOSTS);
 
 let busy = false;
 
@@ -84,6 +86,12 @@ const server = createServer(async (request, response) => {
       stage: "request",
       error: `missing or empty: ${missing.join(", ")}`,
     });
+    return;
+  }
+
+  const refused = refusal(parsed, CONSENT_HOSTS);
+  if (refused !== null) {
+    reply(response, 400, { ok: false, stage: "request", error: refused });
     return;
   }
 

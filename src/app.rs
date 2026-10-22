@@ -4,7 +4,7 @@ use anyhow::{Context as _, Result};
 
 use crate::api::{self, AppContext, Running, VERSION};
 use crate::clock::now_unix;
-use crate::config::{self, Config, StoreConfig};
+use crate::config::{self, AdminPolicy, Config, StoreConfig};
 use crate::crypto::Cipher;
 use crate::dhan::api::DhanAuth;
 use crate::dhan::callback::{CallbackGate, route_of};
@@ -15,9 +15,10 @@ use crate::store::{MemoryStore, PgStore, Store};
 use crate::telegram::{Channel, Notice, Notifier, Topic};
 use crate::vault::Vault;
 
-pub fn unconfigured(problems: Vec<String>, started_at: i64) -> AppContext {
+pub fn unconfigured(problems: Vec<String>, started_at: i64, admin: AdminPolicy) -> AppContext {
     AppContext {
         running: None,
+        admin,
         problems,
         guard: api::guard::TokenGuard::default(),
         started_at,
@@ -101,6 +102,7 @@ pub async fn build(config: Config, started_at: i64) -> Result<AppContext> {
             admin: config.admin.clone(),
             callback_route: route_of(&config.redirect_url),
         }),
+        admin: config.admin.clone(),
         problems: Vec::new(),
         guard: api::guard::TokenGuard::default(),
         started_at,
@@ -131,7 +133,7 @@ pub async fn run() -> Result<()> {
                 "configuration incomplete: {}; serving /health and the dashboard only",
                 gap.problems.join("; ")
             );
-            unconfigured(gap.problems, started_at)
+            unconfigured(gap.problems, started_at, basics.admin.clone())
         }
     };
     api::serve(Arc::new(context), &console, basics.http_addr).await

@@ -224,7 +224,7 @@ export_stage_files() {
     # stray file reaches a container that holds a PIN and a live TOTP.
     if grep -q '\./sidecar:' "$bundle/$compose_name"; then
         local script image_pw npm_pw
-        for script in server.mjs login.mjs prompt.mjs reap.mjs; do
+        for script in server.mjs login.mjs prompt.mjs reap.mjs guard.mjs; do
             [[ -f "$ROOT_DIR/sidecar/$script" ]] \
                 || { err "compose mounts ./sidecar but sidecar/$script is missing"; exit 1; }
         done

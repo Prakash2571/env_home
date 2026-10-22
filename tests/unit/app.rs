@@ -81,7 +81,14 @@ async fn an_unreachable_postgres_does_not_stop_the_service_from_starting() {
 
 #[test]
 fn an_unconfigured_context_carries_only_the_problems() {
-    let context = unconfigured(vec!["X is missing".into()], 9);
+    let context = unconfigured(
+        vec!["X is missing".into()],
+        9,
+        AdminPolicy {
+            require_access_identity: true,
+            allowed_emails: Vec::new(),
+        },
+    );
     assert!(context.running.is_none());
     assert_eq!(context.problems, ["X is missing"]);
 }

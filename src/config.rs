@@ -108,6 +108,22 @@ pub struct ConfigGap {
 pub struct Basics {
     pub http_addr: SocketAddr,
     pub home: PathBuf,
+    pub admin: AdminPolicy,
+}
+
+pub fn admin_policy(read: &dyn Fn(&str) -> Option<String>) -> AdminPolicy {
+    AdminPolicy {
+        require_access_identity: flag(read, "CBL_ADMIN_REQUIRE_ACCESS", true),
+        allowed_emails: text(read, "CBL_ADMIN_EMAILS")
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(|email| email.trim().to_ascii_lowercase())
+                    .filter(|email| !email.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
 }
 
 pub fn basics(read: &dyn Fn(&str) -> Option<String>) -> Basics {
@@ -119,7 +135,11 @@ pub fn basics(read: &dyn Fn(&str) -> Option<String>) -> Basics {
                 .expect("the default address parses")
         });
     let home = text(read, "CBL_HOME").map_or_else(|| PathBuf::from("."), PathBuf::from);
-    Basics { http_addr, home }
+    Basics {
+        http_addr,
+        home,
+        admin: admin_policy(read),
+    }
 }
 
 fn text(read: &dyn Fn(&str) -> Option<String>, name: &str) -> Option<String> {
@@ -176,7 +196,11 @@ pub fn load(read: &dyn Fn(&str) -> Option<String>) -> Result<Config, ConfigGap> 
         read,
         problems: Vec::new(),
     };
-    let Basics { http_addr, home } = basics(read);
+    let Basics {
+        http_addr,
+        home,
+        admin,
+    } = basics(read);
     if let Some(value) = text(read, "CBL_HTTP_ADDR")
         && value.parse::<SocketAddr>().is_err()
     {
@@ -205,18 +229,6 @@ pub fn load(read: &dyn Fn(&str) -> Option<String>) -> Result<Config, ConfigGap> 
             Some(value) => Some(value.to_ascii_lowercase()),
             None => Some("cf-connecting-ip".into()),
         },
-    };
-    let admin = AdminPolicy {
-        require_access_identity: flag(read, "CBL_ADMIN_REQUIRE_ACCESS", true),
-        allowed_emails: text(read, "CBL_ADMIN_EMAILS")
-            .map(|value| {
-                value
-                    .split(',')
-                    .map(|email| email.trim().to_ascii_lowercase())
-                    .filter(|email| !email.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default(),
     };
 
     if !reader.problems.is_empty() {

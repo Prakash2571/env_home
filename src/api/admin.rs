@@ -90,9 +90,11 @@ fn admin<'context>(
 }
 
 pub async fn state(State(context): State<Context>, headers: HeaderMap) -> Response {
-    if let Some(running) = &context.running
-        && let Err(refusal) = identity(&headers, &running.admin)
-    {
+    let policy = context
+        .running
+        .as_ref()
+        .map_or(&context.admin, |running| &running.admin);
+    if let Err(refusal) = identity(&headers, policy) {
         return refusal.into_response();
     }
     (
@@ -122,9 +124,11 @@ fn events(context: Context) -> impl Stream<Item = Result<Event, Infallible>> {
 }
 
 pub async fn stream(State(context): State<Context>, headers: HeaderMap) -> Response {
-    if let Some(running) = &context.running
-        && let Err(refusal) = identity(&headers, &running.admin)
-    {
+    let policy = context
+        .running
+        .as_ref()
+        .map_or(&context.admin, |running| &running.admin);
+    if let Err(refusal) = identity(&headers, policy) {
         return refusal.into_response();
     }
     let sse = Sse::new(events(context)).keep_alive(KeepAlive::new().interval(STREAM_KEEPALIVE));

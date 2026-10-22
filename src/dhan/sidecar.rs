@@ -54,6 +54,25 @@ impl std::fmt::Display for SidecarFailure {
 
 impl std::error::Error for SidecarFailure {}
 
+pub const MAX_DETAIL_CHARS: usize = 240;
+
+pub fn clip_detail(value: &str, limit: usize) -> String {
+    value
+        .split_whitespace()
+        .map(|word| {
+            if word.starts_with("http://") || word.starts_with("https://") {
+                word.split(['?', '#']).next().unwrap_or_default()
+            } else {
+                word
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(limit)
+        .collect()
+}
+
 pub fn hopeless(stage: &str, detail: &str) -> bool {
     let lower = format!("{stage} {detail}").to_lowercase();
     let asked_for_sms = stage == "otp";
@@ -157,8 +176,8 @@ impl Sidecar {
                 .unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
             let hopeless = hopeless(&stage, &detail);
             return Err(SidecarFailure {
-                stage,
-                detail,
+                stage: clip_detail(&stage, 40),
+                detail: clip_detail(&detail, MAX_DETAIL_CHARS),
                 hopeless,
             }
             .into());

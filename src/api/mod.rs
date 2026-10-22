@@ -39,6 +39,7 @@ pub struct Running {
 
 pub struct AppContext {
     pub running: Option<Running>,
+    pub admin: AdminPolicy,
     pub problems: Vec<String>,
     pub guard: guard::TokenGuard,
     pub started_at: i64,
