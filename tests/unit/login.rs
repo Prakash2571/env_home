@@ -372,3 +372,20 @@ async fn a_request_from_the_dashboard_is_served_at_any_hour() {
 fn ist_midnight_is_the_start_of_the_ist_day() {
     assert_eq!(ist_midnight(MONDAY_0810_IST), 1_792_348_200);
 }
+
+#[tokio::test]
+async fn a_restart_after_the_window_stays_quiet_when_every_account_is_ready() {
+    let (engine, _) = harness(Fakes::default(), MANUAL_TIMEOUT).await;
+    engine.login("main", Drive::Automated).await.unwrap();
+    let window = LoginWindow::parse("00:00-00:01", "mon-sun").unwrap();
+    let (mut restarted, _handle) = Scheduler::new(Arc::clone(&engine), window, Arc::new(now_unix));
+    restarted.tick().await;
+    assert!(
+        !engine
+            .live()
+            .events()
+            .iter()
+            .any(|event| event.message.contains("morning summary")),
+        "a deploy after the window must not repeat 'everyone logged in'"
+    );
+}

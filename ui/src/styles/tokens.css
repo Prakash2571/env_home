@@ -1,0 +1,80 @@
+:root {
+  color-scheme: dark;
+
+  --page: #0a0b0d;
+  --panel: #12141a;
+  --nested: #171a20;
+  --header: #1d2028;
+
+  --text: #e8eaed;
+  --dim: #888f99;
+  --faint: #2f343c;
+  --rule: #22262d;
+
+  --running: #58a6ff;
+  --done: #3fb950;
+  --failed: #f85149;
+  --warn: #d29922;
+  --skipped: #6e7681;
+
+  --mono: ui-monospace, "JetBrains Mono", "IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace;
+  --display: "Inter", "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+
+  --gap: 12px;
+  --pad: 14px;
+  --radius: 4px;
+
+  --fs-micro: 10px;
+  --fs-label: 11px;
+  --fs-body: 13px;
+  --fs-value: 15px;
+  --fs-lead: 20px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--page);
+  color: var(--text);
+  font-family: var(--display);
+  font-size: var(--fs-body);
+  line-height: 1.45;
+}
+
+a {
+  color: var(--running);
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.muted {
+  color: var(--dim);
+}
+
+.tone-done {
+  color: var(--done);
+}
+
+.tone-failed {
+  color: var(--failed);
+}
+
+.tone-running {
+  color: var(--running);
+}
+
+.tone-warn {
+  color: var(--warn);
+}
+
+.tone-dim {
+  color: var(--dim);
+}

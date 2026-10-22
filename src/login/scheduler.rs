@@ -38,6 +38,7 @@ struct DayLedger {
     attempts: HashMap<String, u32>,
     stopped: HashSet<String>,
     summary_sent: bool,
+    saw_window: bool,
 }
 
 pub struct Scheduler {
@@ -113,6 +114,7 @@ impl Scheduler {
         let now = (self.now)();
         self.roll_day(now);
         if self.window.is_open(now) {
+            self.ledger.saw_window = true;
             let due = self.due().await;
             if due.is_empty() {
                 return Duration::from_secs(self.window.seconds_left(now).max(1) as u64);
@@ -150,6 +152,9 @@ impl Scheduler {
             } else {
                 missing.push(account.alias.clone());
             }
+        }
+        if missing.is_empty() && !self.ledger.saw_window {
+            return;
         }
         let summary = if missing.is_empty() {
             Notice::info(Topic::Login, "every account logged in this morning")
