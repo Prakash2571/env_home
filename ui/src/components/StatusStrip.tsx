@@ -47,7 +47,7 @@ export function StatusStrip({ snapshot, link }: StatusStripProps) {
     },
     {
       label: "token API",
-      value: snapshot.api_requires_access_jwt ? "service token + TOTP" : "client ID + TOTP",
+      value: snapshot.api_requires_access_jwt ? "Access header + TOTP" : "client ID + TOTP",
       tone: "dim",
     },
   ];

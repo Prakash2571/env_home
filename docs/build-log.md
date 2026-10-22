@@ -2,6 +2,22 @@
 
 **What is built, what was verified, and what is open.** A new dated section after every change lands, newest first. The commit bodies carry the detail; this is the map.
 
+## 2026-10-22 (later): security review fixes
+
+A security review of the whole branch found no critical issues. It found one HIGH and eight MEDIUM issues, all addressed in commits `4b003bb`, `35fc176`, `4480944`, `7ef9ba5`, `86fc454` and `022bc72`:
+
+- **HIGH: lockout as denial of service.** The client ID is public, so five wrong codes every ten minutes could keep an engine from its token. Lockouts are now per (client ID, source), with a global budget of 30 failures per client and per shared seed.
+- **Enumeration** through the constant decoy seed: the decoy is now random per process and can never pass.
+- **Unbounded state:** the guard maps are capped and fail closed; rate-limited requests write nothing; retention prunes rows after 90 or 30 days; lockout alerts are throttled.
+- **Postgres held the whole `.env`;** it now gets only its own three variables.
+- **Callback spam could abort a manual login:** per-source caps, dedup, and rejected exchanges no longer end the wait.
+- **Whole client IDs on the dashboard** (found here first): masked.
+- **Hardening:** redacting `Debug`, timestamps bound into the AEAD, a sidecar consent-host allowlist, clipped page text, the identity check in unconfigured mode, charset-checked contract values, a read-only app container with no capabilities, log dirs 750, and `cargo audit` and `npm audit` in CI.
+
+**Left, and said plainly in [security.md](manual/security.md):** Access headers are trusted, not verified, so a local process on the box could forge them (phase 6, JWT verification). The D4 flag checks header presence only. Replay state is in memory. The sidecar installs Playwright at first start.
+
+**Verified:** see the numbers in the next commit; the hardened compose file ran locally (read-only root, `CapDrop=[ALL]`, Postgres environment free of secrets); `cargo audit` and both `npm audit`s report 0 advisories.
+
 ## 2026-10-22: the service, end to end
 
 Branch `tamagami-hi/dev`, commits `523e6e6` … this one.

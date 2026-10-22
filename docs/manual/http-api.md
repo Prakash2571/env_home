@@ -10,7 +10,7 @@ The service listens on `CBL_HTTP_ADDR`, which is `0.0.0.0:47440` inside the cont
 | --- | --- | --- | --- |
 | GET | `/health` | the deploy gate, monitors | none; it reveals only `ok` or `unconfigured` and a count |
 | GET | `/robots.txt` | crawlers | none; `Disallow: /` |
-| GET | `/dhan/callback` (the path of `DHAN_REDIRECT_URL`) | Dhan's consent page | validated before use; only while a login waits; 20 attempts per login |
+| GET | `/dhan/callback` (the path of `DHAN_REDIRECT_URL`) | Dhan's consent page | validated before use; only while a login waits; 5 attempts per source, 200 per login |
 | POST | `/api/v1/token` | trading engines | TOTP gate (below) |
 | GET | `/api/state` | the dashboard | Access identity |
 | GET | `/api/stream` | the dashboard (SSE) | Access identity |
@@ -28,8 +28,8 @@ Every response carries `X-Robots-Tag: noindex, nofollow, noarchive, nosnippet`, 
 ```http
 POST /api/v1/token
 Content-Type: application/json
-CF-Access-Client-Id: <service token id>          (only if D4 is decided that way)
-CF-Access-Client-Secret: <service token secret>
+CF-Access-Client-Id: <service token id>          (only if D4 is decided that way;
+CF-Access-Client-Secret: <service token secret>   Cloudflare checks these, the app checks its header)
 
 {"client_id": "1100000001", "totp": "123456"}
 ```
@@ -42,7 +42,7 @@ CF-Access-Client-Secret: <service token secret>
 | 400 | `bad_request` | not JSON, or `client_id`/`totp` malformed | fix the request |
 | 401 | `unauthorized` | wrong code, unknown client ID, or (D4 on) no Access service token | check the seed and the clock; do not retry in a loop |
 | 409 | `code_already_used` | that code was already accepted once | wait for `Retry-After` (the next 30 s step) and send the new code |
-| 429 | `locked` | 5 wrong codes in 10 minutes; locked for 10 minutes | wait for `Retry-After`; Telegram was alerted |
+| 429 | `locked` | 5 wrong codes in 10 minutes from that source, or 30 from all sources; locked for 10 minutes | wait for `Retry-After`; Telegram was alerted |
 | 429 | `rate_limited` | more than 30 requests a minute from one IP | wait 60 s |
 | 503 | `no_token_yet` | no valid token for that account yet today | wait for `Retry-After`, at most 5 minutes |
 | 503 | `not_configured` | the service is up but not configured | page the operator |
@@ -50,7 +50,8 @@ CF-Access-Client-Secret: <service token secret>
 Why it is shaped like this:
 
 - **POST, not GET,** so the code never lands in a URL, a proxy log or a history. Every reply is `Cache-Control: no-store`.
-- **An unknown client ID and a wrong code get the same reply and the same lockout** (the unknown one is checked against a decoy seed). The API can't be used to discover which client IDs exist.
+- **An unknown client ID and a wrong code get the same reply and the same lockout.** The unknown one is checked against a random per-process decoy seed that can never pass, so the API can't be used to discover which client IDs exist.
+- **A lockout belongs to the source that earned it.** A guesser elsewhere cannot lock the engine out by sending wrong codes for its client ID. Only 30 failures from all sources together lock the client everywhere.
 - **One step of clock drift** each way is accepted, so a code from the previous or next 30 s step still passes.
 - **A code is accepted once.** Two engines fetching the same account in the same 30 s step: the second gets 409 and retries on the next step. Tokens last about 24 hours, so an engine fetches once a morning and caches.
 - **Every request is recorded** (client ID, account, IP, outcome, reason) and shown on the dashboard.

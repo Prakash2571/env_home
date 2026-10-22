@@ -87,7 +87,7 @@ describe("StatusStrip", () => {
     expect(strip).toHaveTextContent("postgres (unreachable)");
     expect(strip).toHaveTextContent("manual only");
     expect(strip).toHaveTextContent("Telegram returned HTTP 400");
-    expect(strip).toHaveTextContent("service token + TOTP");
+    expect(strip).toHaveTextContent("Access header + TOTP");
   });
 
   it("handles a service without a window or Telegram", () => {

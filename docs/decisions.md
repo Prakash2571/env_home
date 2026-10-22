@@ -25,7 +25,7 @@ Each row says what the code does **meanwhile**. Every open decision is a configu
 | D1 | Which brokers? | Dhan only for now | Dhan only (`src/dhan/`); another broker would be a sibling module behind the login engine |
 | D2 | How many accounts, and does each have its own Dhan API app? | — | any number, via `CBL_ACCOUNTS`; each needs its own key and secret with the shared redirect URL |
 | D3 | One API TOTP seed per account, or one shared? | per account | **both work**: `TOKEN_API_<ALIAS>_TOTP_SECRET` wins, else `TOKEN_API_TOTP_SECRET`; the dashboard shows which each account uses |
-| D4 | Require a Cloudflare Access service token on `/api/v1` as well as the TOTP? | yes | off: `CBL_API_REQUIRE_ACCESS_JWT=false`; client ID + TOTP + lockout + per-IP limit |
+| D4 | Require a Cloudflare Access service token on `/api/v1` as well as the TOTP? | yes | off: `CBL_API_REQUIRE_ACCESS_JWT=false`. Meanwhile it is client ID + TOTP + per-source lockout + per-IP limit. Turned on, the app requires the Access JWT header to be **present**; Cloudflare verifies the token, and the app verifies the signature only from phase 6 |
 | D5 | The subdomain name | `login.beonedge.in` | placeholder `login.beonedge.in` in the examples; the code reads `DHAN_REDIRECT_URL` |
 | D6 | Which Google accounts may open the dashboard? | your own | Access policy decides; `CBL_ADMIN_EMAILS` empty means anyone Access admits |
 | D7 | Replace the legacy Next.js env store (Prakash's) on this branch? | yes, after a word with Prakash | **kept untouched** beside the new service; its CI job still runs; its README is in `docs/legacy/` |
