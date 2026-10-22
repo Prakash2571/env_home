@@ -307,7 +307,7 @@ async fn wrong_codes_and_unknown_clients_look_the_same_and_both_lock_out() {
         "the reply must not reveal whether the client exists"
     );
 
-    for _ in 0..4 {
+    for _ in 0..5 {
         call(
             &harness.router,
             token_request(
@@ -335,6 +335,21 @@ async fn wrong_codes_and_unknown_clients_look_the_same_and_both_lock_out() {
             .unwrap()
             > 500
     );
+
+    let (status, _, body) = call(
+        &harness.router,
+        token_request(
+            json!({"client_id": "1100000001", "totp": current_code()}),
+            "198.51.100.10",
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the guesser's lockout must not deny the engine on its own IP"
+    );
+    assert_eq!(body["access_token"], "eyJ.live");
 }
 
 #[tokio::test]
@@ -609,5 +624,31 @@ async fn the_audit_trail_on_the_dashboard_hides_whole_client_ids_too() {
     assert!(
         !state.to_string().contains("1100000001"),
         "no route to the browser may carry a whole client ID"
+    );
+}
+
+#[tokio::test]
+async fn rate_limited_requests_cost_no_database_write_and_bad_json_is_audited() {
+    let harness = harness(open_api(), access_required(), None).await;
+    let garbage = Request::post("/api/v1/token")
+        .header("cf-connecting-ip", "192.0.2.50")
+        .body(Body::from("{not json"))
+        .unwrap();
+    assert_eq!(
+        call(&harness.router, garbage).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        harness.store.recent_requests(100).await.unwrap().len(),
+        1,
+        "malformed JSON passes the rate limit and the audit like any request"
+    );
+    for _ in 0..40 {
+        call(&harness.router, token_request(json!({}), "192.0.2.51")).await;
+    }
+    assert_eq!(
+        harness.store.recent_requests(100).await.unwrap().len(),
+        31,
+        "only the 30 admitted requests are written; the 10 refused at the limiter are not"
     );
 }

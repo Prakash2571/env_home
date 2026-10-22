@@ -2,17 +2,18 @@ use std::net::SocketAddr;
 
 use axum::Extension;
 use axum::Json;
+use axum::body::Bytes;
 use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::guard::Refusal;
+use super::guard::{Attempt, Refusal};
 use super::{Context, Running};
 use crate::clock::{describe, ist_iso, now_unix};
 use crate::config::Account;
-use crate::otp::now_seconds;
+use crate::otp::{is_six_digits, now_seconds, seconds_remaining};
 use crate::state::{EventKind, client_id_hint};
 use crate::store::RequestRecord;
 use crate::telegram::{Notice, Topic};
@@ -27,11 +28,27 @@ pub struct TokenRequest {
     totp: Option<String>,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Outcome {
+    Served,
+    Refused,
+    RateLimited,
+}
+
+impl Outcome {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Served => "served",
+            Self::Refused | Self::RateLimited => "refused",
+        }
+    }
+}
+
 struct Reply {
     status: StatusCode,
     body: Value,
     retry_after: Option<i64>,
-    outcome: &'static str,
+    outcome: Outcome,
     reason: String,
 }
 
@@ -41,9 +58,15 @@ impl Reply {
             status,
             body: json!({ "error": error }),
             retry_after: None,
-            outcome: "refused",
+            outcome: Outcome::Refused,
             reason: reason.into(),
         }
+    }
+
+    #[must_use]
+    fn retry_in(mut self, seconds: i64) -> Self {
+        self.retry_after = Some(seconds);
+        self
     }
 
     fn into_response(self) -> Response {
@@ -90,7 +113,7 @@ pub async fn issue(
     State(context): State<Context>,
     peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
-    body: Option<Json<TokenRequest>>,
+    body: Bytes,
 ) -> Response {
     let Some(running) = &context.running else {
         return Reply::refused(StatusCode::SERVICE_UNAVAILABLE, "not_configured", "")
@@ -101,7 +124,7 @@ pub async fn issue(
         peer.map(|Extension(ConnectInfo(address))| address),
         running.api.client_ip_header.as_deref(),
     );
-    let request = body.map(|Json(request)| request);
+    let request: Option<TokenRequest> = serde_json::from_slice(&body).ok();
     let client_id = request
         .as_ref()
         .and_then(|request| request.client_id.clone())
@@ -122,48 +145,62 @@ pub async fn issue(
         account,
     )
     .await;
+    if reply.outcome != Outcome::RateLimited {
+        record(running, ip.as_deref(), &client_id, account, &reply).await;
+    }
+    reply.into_response()
+}
 
-    let record = RequestRecord {
+async fn record(
+    running: &Running,
+    ip: Option<&str>,
+    client_id: &str,
+    account: Option<&Account>,
+    reply: &Reply,
+) {
+    let valid = valid_client_id(client_id);
+    let row = RequestRecord {
         at: now_unix(),
-        client_id: if valid_client_id(&client_id) {
-            client_id.clone()
+        client_id: if valid {
+            client_id.to_owned()
         } else {
             "<invalid>".into()
         },
         alias: account.map(|account| account.alias.clone()),
-        ip: ip.clone(),
-        outcome: reply.outcome.into(),
+        ip: ip.map(str::to_owned),
+        outcome: reply.outcome.label().into(),
         reason: reply.reason.clone(),
     };
-    if let Err(error) = running.engine.vault().store().record_request(&record).await {
+    if let Err(error) = running.engine.vault().store().record_request(&row).await {
         tracing::warn!(%error, "could not record a token request");
     }
     let live = running.engine.live();
-    let shown = if valid_client_id(&client_id) {
-        client_id_hint(&client_id)
+    let shown = if valid {
+        client_id_hint(client_id)
     } else {
         "an invalid client".into()
     };
-    if reply.outcome == "served" {
-        if let Some(account) = account {
-            live.update(&account.alias, |view| view.last_served_at = Some(record.at));
+    let alias = account.map(|account| account.alias.as_str());
+    if reply.outcome == Outcome::Served {
+        if let Some(alias) = alias {
+            live.update(alias, |view| view.last_served_at = Some(row.at));
         }
         live.note(
             EventKind::Api,
-            account.map(|account| account.alias.as_str()),
-            format!(
-                "token served to {shown} from {}",
-                ip.as_deref().unwrap_or("?")
-            ),
+            alias,
+            format!("token served to {shown} from {}", ip.unwrap_or("?")),
         );
     } else {
         live.note(
             EventKind::Api,
-            account.map(|account| account.alias.as_str()),
+            alias,
             format!("token refused for {shown}: {}", reply.reason),
         );
     }
-    reply.into_response()
+}
+
+fn seconds_until(until: u64, fallback: i64) -> i64 {
+    i64::try_from(until.saturating_sub(now_seconds())).unwrap_or(fallback)
 }
 
 async fn decide(
@@ -175,24 +212,23 @@ async fn decide(
     request: Option<&TokenRequest>,
     account: Option<&Account>,
 ) -> Reply {
-    if running.api.require_access_jwt && headers.get(ACCESS_JWT_HEADER).is_none() {
-        return Reply::refused(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "no Cloudflare Access service token",
-        );
-    }
-    if !context
-        .guard
-        .admit_ip(ip.unwrap_or("unknown"), now_seconds())
-    {
+    let source = ip.unwrap_or("unknown");
+    if !context.guard.admit_ip(source, now_seconds()) {
         let mut reply = Reply::refused(
             StatusCode::TOO_MANY_REQUESTS,
             "rate_limited",
             "too many requests from this IP",
-        );
-        reply.retry_after = Some(60);
+        )
+        .retry_in(60);
+        reply.outcome = Outcome::RateLimited;
         return reply;
+    }
+    if running.api.require_access_jwt && headers.get(ACCESS_JWT_HEADER).is_none() {
+        return Reply::refused(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "no Cloudflare Access header",
+        );
     }
     let Some(request) = request else {
         return Reply::refused(
@@ -202,7 +238,7 @@ async fn decide(
         );
     };
     let code = request.totp.as_deref().unwrap_or_default();
-    if !valid_client_id(client_id) || !crate::otp::is_six_digits(code) {
+    if !valid_client_id(client_id) || !is_six_digits(code) {
         return Reply::refused(
             StatusCode::BAD_REQUEST,
             "bad_request",
@@ -210,52 +246,39 @@ async fn decide(
         );
     }
 
-    let seed = account.map(|account| account.api_totp_seed.as_slice());
-    match context
-        .guard
-        .check_code(client_id, seed, code, now_seconds())
-    {
+    let attempt = Attempt {
+        client_id,
+        source,
+        secret: account.map(|account| account.api_totp_seed.as_slice()),
+        shared_seed: account.is_some_and(|account| account.api_seed_shared),
+        code,
+        now: now_seconds(),
+    };
+    match context.guard.check_code(&attempt) {
         Ok(_) => {}
         Err(Refusal::Malformed) => {
             return Reply::refused(StatusCode::BAD_REQUEST, "bad_request", "totp is malformed");
         }
         Err(Refusal::Reused) => {
-            let mut reply = Reply::refused(
+            let wait = i64::try_from(seconds_remaining(now_seconds())).unwrap_or(30);
+            return Reply::refused(
                 StatusCode::CONFLICT,
                 "code_already_used",
                 "a code is accepted once; wait for the next one",
-            );
-            reply.retry_after =
-                Some(i64::try_from(crate::otp::seconds_remaining(now_seconds())).unwrap_or(30));
-            return reply;
+            )
+            .retry_in(wait);
         }
         Err(Refusal::Locked { until }) => {
-            let mut reply = Reply::refused(
+            return Reply::refused(
                 StatusCode::TOO_MANY_REQUESTS,
                 "locked",
                 "locked after repeated wrong codes",
-            );
-            reply.retry_after =
-                Some(i64::try_from(until.saturating_sub(now_seconds())).unwrap_or(600));
-            return reply;
+            )
+            .retry_in(seconds_until(until, 600));
         }
         Err(Refusal::Wrong { locked_until }) => {
             if let Some(until) = locked_until {
-                running.engine.notifier().send(
-                    &Notice::problem(Topic::Api, "a client was locked out of the token API")
-                        .fact("client", client_id_hint(client_id))
-                        .fact("known account", account.map_or("no", |_| "yes"))
-                        .fact("from", ip.unwrap_or("?"))
-                        .fact(
-                            "locked for",
-                            describe(
-                                i64::try_from(until.saturating_sub(now_seconds())).unwrap_or(0),
-                            ),
-                        )
-                        .next(
-                            "if this was not one of your engines, rotate that account's API seed",
-                        ),
-                );
+                alert_lockout(context, running, client_id, account, source, until);
             }
             return Reply::refused(
                 StatusCode::UNAUTHORIZED,
@@ -266,6 +289,31 @@ async fn decide(
     }
 
     let account = account.expect("a passing code implies a known account");
+    serve(running, account).await
+}
+
+fn alert_lockout(
+    context: &Context,
+    running: &Running,
+    client_id: &str,
+    account: Option<&Account>,
+    source: &str,
+    until: u64,
+) {
+    if !context.guard.should_alert(client_id, now_seconds()) {
+        return;
+    }
+    running.engine.notifier().send(
+        &Notice::problem(Topic::Api, "a client was locked out of the token API")
+            .fact("client", client_id_hint(client_id))
+            .fact("known account", account.map_or("no", |_| "yes"))
+            .fact("from", source)
+            .fact("locked for", describe(seconds_until(until, 0)))
+            .next("if this was not one of your engines, rotate that account's API seed"),
+    );
+}
+
+async fn serve(running: &Running, account: &Account) -> Reply {
     let now = now_unix();
     match running.engine.vault().open_valid(account, now).await {
         Ok(Some(open)) => Reply {
@@ -278,23 +326,22 @@ async fn decide(
                 "expires_in": open.expires_at - now,
             }),
             retry_after: None,
-            outcome: "served",
+            outcome: Outcome::Served,
             reason: format!("valid for {}", describe(open.expires_at - now)),
         },
         Ok(None) => {
-            let mut reply = Reply::refused(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "no_token_yet",
-                "no valid token for this account yet",
-            );
             let wait = running.window.seconds_left(now).max(
                 running
                     .window
                     .seconds_until_open(now)
                     .min(NOT_READY_RETRY_SECONDS),
             );
-            reply.retry_after = Some(wait.clamp(30, NOT_READY_RETRY_SECONDS));
-            reply
+            Reply::refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "no_token_yet",
+                "no valid token for this account yet",
+            )
+            .retry_in(wait.clamp(30, NOT_READY_RETRY_SECONDS))
         }
         Err(error) => {
             tracing::error!(alias = %account.alias, %error, "a stored token would not open");
