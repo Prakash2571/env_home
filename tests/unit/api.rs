@@ -588,3 +588,26 @@ async fn the_built_console_is_served_with_a_spa_fallback() {
     assert!(body.as_str().unwrap().contains("<title>console</title>"));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test]
+async fn the_audit_trail_on_the_dashboard_hides_whole_client_ids_too() {
+    let harness = harness(open_api(), access_required(), None).await;
+    call(
+        &harness.router,
+        token_request(
+            json!({"client_id": "1100000001", "totp": "000000"}),
+            "203.0.113.8",
+        ),
+    )
+    .await;
+    let request = Request::get("/api/state")
+        .header("cf-access-authenticated-user-email", EMAIL)
+        .body(Body::empty())
+        .unwrap();
+    let (_, _, state) = call(&harness.router, request).await;
+    assert_eq!(state["requests"][0]["client_id"], "••••0001");
+    assert!(
+        !state.to_string().contains("1100000001"),
+        "no route to the browser may carry a whole client ID"
+    );
+}

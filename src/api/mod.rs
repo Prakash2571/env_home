@@ -18,7 +18,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use crate::clock::now_unix;
 use crate::config::{AdminPolicy, ApiPolicy};
 use crate::login::{LoginEngine, SchedulerHandle};
-use crate::state::{AccountView, EventView};
+use crate::state::{AccountView, EventView, client_id_hint};
 use crate::store::{AttemptRecord, RequestRecord};
 use crate::telegram::TelegramView;
 
@@ -114,7 +114,20 @@ pub async fn snapshot(context: &AppContext) -> Snapshot {
         accounts: running.engine.live().accounts(),
         telegram: running.engine.notifier().view(),
         events: running.engine.live().events(),
-        requests: store.recent_requests(25).await.unwrap_or_default(),
+        requests: store
+            .recent_requests(25)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|request| RequestRecord {
+                client_id: if request.client_id.starts_with('<') {
+                    request.client_id.clone()
+                } else {
+                    client_id_hint(&request.client_id)
+                },
+                ..request
+            })
+            .collect(),
         attempts: store.recent_attempts(25).await.unwrap_or_default(),
     }
 }
