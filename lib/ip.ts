@@ -21,7 +21,7 @@ export function ipAllowed(ip: string | null, rules: string[]): boolean {
     if (prefix === undefined) list.addAddress(address, family);
     else list.addSubnet(address, Number(prefix), family);
   }
-  return list.check(ip);
+  return list.check(ip, isIP(ip) === 6 ? "ipv6" : "ipv4");
 }
 
 export function clientIp(headers: Headers): string | null {
