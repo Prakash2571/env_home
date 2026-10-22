@@ -1,0 +1,14 @@
+{
+  "name": "broker-login-sidecar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Drives a broker consent page in Chromium and returns the tokenId",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.63.0"
+  }
+}

@@ -6,3 +6,9 @@ out
 .env.*
 !.env.example
 *.tsbuildinfo
+/target
+ui/node_modules
+ui/dist
+ui/coverage
+sidecar/node_modules
+/data
