@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "db:setup": "node --env-file=.env scripts/db-setup.mjs"
+    "db:setup": "node scripts/db-setup.mjs"
   },
   "dependencies": {
     "next": "16.4.0",
