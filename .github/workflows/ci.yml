@@ -21,7 +21,7 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgres://env_home:test_password@localhost:5432/env_home
-      ADMIN_PASSWORD: ci-only-test-password-long
+      ADMIN_PASSWORD: x
       AUTH_SECRET: ci-only-auth-secret-that-is-long-enough
       ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
     steps:
