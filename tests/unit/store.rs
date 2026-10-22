@@ -72,22 +72,42 @@ async fn honours_the_store_contract(store: Store, base: i64) {
         1,
         "only spent consents since the cut-off count"
     );
-    let attempts = store.recent_attempts(2).await.unwrap();
-    assert_eq!(attempts.len(), 2);
-    assert_eq!(attempts[0].started_at, base + 20, "newest first");
+    let ours: Vec<AttemptRecord> = store
+        .recent_attempts(1_000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|row| row.alias == alias)
+        .collect();
+    assert_eq!(
+        ours.len(),
+        3,
+        "a shared database holds other runs' rows; only ours count"
+    );
+    assert_eq!(ours[0].started_at, base + 20, "newest first");
+    assert_eq!(
+        store.recent_attempts(2).await.unwrap().len(),
+        2,
+        "the limit is honoured"
+    );
 
-    store
-        .record_request(&request(base + 1, "refused"))
+    let mut refused = request(base + 1, "refused");
+    refused.client_id.clone_from(&alias);
+    let mut served = request(base + 2, "served");
+    served.client_id.clone_from(&alias);
+    store.record_request(&refused).await.unwrap();
+    store.record_request(&served).await.unwrap();
+    let requests: Vec<RequestRecord> = store
+        .recent_requests(1_000)
         .await
-        .unwrap();
-    store
-        .record_request(&request(base + 2, "served"))
-        .await
-        .unwrap();
-    let requests = store.recent_requests(1).await.unwrap();
-    assert_eq!(requests.len(), 1);
+        .unwrap()
+        .into_iter()
+        .filter(|row| row.client_id == alias)
+        .collect();
+    assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].outcome, "served");
     assert_eq!(requests[0].ip.as_deref(), Some("203.0.113.7"));
+    assert_eq!(store.recent_requests(1).await.unwrap().len(), 1);
 }
 
 #[tokio::test]
