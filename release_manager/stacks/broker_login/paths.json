@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "stack": "broker_login",
+  "environment": "production",
+  "short": "app",
+  "image_prefix": "cbl",
+  "vps": {
+    "root": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN",
+    "stack_dir": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login",
+    "paths_file": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/paths.json",
+    "images_dir": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/images",
+    "compose_file": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/compose.broker_login.yml",
+    "compose_name": "compose.broker_login.yml",
+    "env_file": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/.env",
+    "env_example": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/.env.example",
+    "version_file": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/app-version.json",
+    "version_name": "app-version.json",
+    "manifest_file": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/manifest.json",
+    "checksums_file": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/checksums.sha256",
+    "deploy_script": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/broker_login_deploy.sh",
+    "rollback_script": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/broker_login_rollback.sh",
+    "guide": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/APP_GUIDE.md",
+    "registry": "/srv/dev_stack/CENTRALISED_BROKER_LOGIN/manifest.json",
+    "data_volume": "cbl_app_data",
+    "docker": "docker",
+    "app_container": "cbl-app",
+    "login_container": "cbl-login",
+    "compose_project": "centralised_broker_login",
+    "lock_file": "/run/lock/centralised-broker-login.lock"
+  },
+  "backup": {
+    "root": "/srv/backup/CENTRALISED_BROKER_LOGIN/backup",
+    "rollback_root": "/srv/backup/CENTRALISED_BROKER_LOGIN/backup/rollback",
+    "rollback_images": "/srv/backup/CENTRALISED_BROKER_LOGIN/backup/rollback/images",
+    "logs_root": "/srv/backup/CENTRALISED_BROKER_LOGIN/logs",
+    "deploy_log": "/srv/backup/CENTRALISED_BROKER_LOGIN/logs/deploy",
+    "app_log": "/srv/backup/CENTRALISED_BROKER_LOGIN/logs/app"
+  },
+  "images": [
+    {
+      "key": "app",
+      "archive": "app.tar.gz"
+    }
+  ],
+  "database": {
+    "enabled": true,
+    "container": "cbl-postgres",
+    "dump_dir": "/srv/backup/CENTRALISED_BROKER_LOGIN/backup/db",
+    "keep_dumps": 14
+  },
+  "health": {
+    "mode": "http",
+    "http_url": "http://127.0.0.1:47440/health",
+    "settle_seconds": 30
+  },
+  "edge": {
+    "mode": "cloudflare_tunnel",
+    "systemd_unit": "cloudflared",
+    "origin_url": "http://127.0.0.1:47440/"
+  },
+  "retention": {
+    "keep_releases": 3
+  }
+}

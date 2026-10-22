@@ -1,0 +1,159 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# The DEPLOYED compose file. Runs on the VPS only, as project
+# centralised_broker_login in /srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login.
+#
+# No build: stanza on purpose. The app image arrives as a tarball and is loaded
+# by the native deploy script, so a build here would be both impossible (no
+# source on the VPS) and a way to silently ship something other than what was
+# tested.
+#
+# CBL_VERSION is exported by the native deploy script and must resolve to the
+# release being deployed. Compose fails on an unset variable rather than
+# defaulting, so a missing export cannot start the wrong image.
+#
+# Postgres and the Playwright sidecar are pinned upstream images pulled on the
+# VPS, so they are not in the bundle and not versioned with the app.
+#
+# The public edge is NOT here. The host's cloudflared service (systemd, shared
+# with every other site on the box) routes the subdomain to 127.0.0.1:47440.
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  app:
+    image: cbl-app:${CBL_VERSION:?CBL_VERSION must be set by the deploy script}
+    container_name: cbl-app
+    restart: unless-stopped
+    # The image runs as uid 10001; this stops a setuid binary inside the
+    # container from raising privileges.
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - .env
+    environment:
+      CBL_HOME: /app
+      # Set here rather than in .env because env_file does NOT expand ${...}.
+      CBL_HTTP_ADDR: 0.0.0.0:47440
+      CBL_DATABASE_HOST: postgres
+      CBL_SIDECAR_URL: http://login:8090/login
+      TZ: Asia/Kolkata
+    ports:
+      # Loopback only. cloudflared reaches it here, and so does the deploy
+      # health probe. 47440 sits after the 47410-47434 block the boe stacks use.
+      - "127.0.0.1:47440:47440"
+    volumes:
+      - app-data:/app/data
+    networks:
+      - default
+      - datastore
+    depends_on:
+      postgres:
+        condition: service_healthy
+    stop_grace_period: 20s
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  # Tokens, accounts, login attempts and the API audit trail. No ports: and an
+  # internal network, so the database has no route off this host and only the
+  # app reaches it, as postgres:5432. It is NOT the shared boe-postgres.
+  #
+  # The app runs its own migrations at start from SQL embedded in the binary.
+  # The deploy dumps this database before every release (backup/db/).
+  postgres:
+    image: postgres:17-alpine
+    container_name: cbl-postgres
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-broker_login}
+      POSTGRES_USER: ${POSTGRES_USER:-broker_login}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - datastore
+    stop_grace_period: 30s
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  # The browser that completes the broker consent unattended. The image carries
+  # Chromium but NOT the playwright npm package, and NODE_PATH does not apply to
+  # ESM imports, so the package is installed once into a named volume and the
+  # mounted scripts are copied beside it.
+  #
+  # The scripts are bind-mounted rather than baked in, so a selector broken by a
+  # change to the broker's page is fixed with a restart, not a rebuild.
+  #
+  # No ports: on purpose. The endpoint takes an account ID, a PIN and a live
+  # TOTP, and it is unauthenticated, so only the app may reach it.
+  login:
+    image: mcr.microsoft.com/playwright:v1.63.0-noble
+    container_name: cbl-login
+    restart: unless-stopped
+    # tini as PID 1 reaps Chromium's helper processes, which otherwise pile up
+    # as zombies under node.
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PORT: "8090"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - cd /opt/node && { [ -d node_modules/playwright ] || npm install --no-save
+        --no-package-lock --no-audit --no-fund playwright@1.63.0 ; } &&
+        cp /srv/sidecar/*.mjs /opt/node/ && exec node /opt/node/server.mjs
+    volumes:
+      - ./sidecar:/srv/sidecar:ro
+      - login-modules:/opt/node
+    networks:
+      - default
+    # Chromium dies on the default 64m /dev/shm.
+    shm_size: 256m
+    # The reference measured a 167 MiB peak per login; this is triple that.
+    mem_limit: 512m
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  default:
+  # No route off the host. Postgres is reachable only from the app.
+  datastore:
+    internal: true
+
+volumes:
+  app-data:
+    name: cbl_app_data
+  postgres-data:
+    name: cbl_postgres_data
+  # The playwright npm package, installed on first start. Losing it costs one
+  # npm install.
+  login-modules:
+    name: cbl_login_modules
