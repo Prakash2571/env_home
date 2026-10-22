@@ -57,7 +57,15 @@ export function adminFromRequest(request: NextRequest): boolean {
 
 export function sameOrigin(request: NextRequest): boolean {
   const origin = request.headers.get("origin");
-  return !!origin && origin === new URL(request.url).origin;
+  const host = request.headers.get("host");
+  if (!origin || !host) return false;
+  try {
+    const parsed = new URL(origin);
+    const protocol = request.headers.get("x-forwarded-proto") ?? new URL(request.url).protocol.slice(0, -1);
+    return parsed.host === host && parsed.protocol === `${protocol}:`;
+  } catch {
+    return false;
+  }
 }
 
 export const sessionName = COOKIE;
