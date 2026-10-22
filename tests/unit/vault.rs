@@ -95,3 +95,22 @@ async fn a_token_sealed_under_another_key_fails_loudly_rather_than_serving_garba
     assert!(rotated.open_valid(&main, now_unix()).await.is_err());
     assert_eq!(rotated.store().kind(), "memory");
 }
+
+#[tokio::test]
+async fn a_row_whose_expiry_was_edited_in_the_database_will_not_open() {
+    let store = Store::Memory(MemoryStore::default());
+    let main = account("main", "1100000001");
+    let vault = Vault::new(store.clone(), Cipher::from_hex(KEY).unwrap());
+    let now = now_unix();
+    let mut stored = vault
+        .seal(&main, &session(now - 90_000, 86_000), "scheduled")
+        .await
+        .unwrap();
+    stored.expires_at = now + 86_000;
+    stored.obtained_at = now;
+    store.save_token(&stored).await.unwrap();
+    assert!(
+        vault.open_valid(&main, now).await.is_err(),
+        "the validity window is bound into the ciphertext, so extending it breaks authentication"
+    );
+}

@@ -72,6 +72,22 @@ impl MemoryStore {
         u32::try_from(count).unwrap_or(u32::MAX)
     }
 
+    pub fn prune(&self, history_before: i64, tokens_before: i64) -> u64 {
+        let mut tables = self.tables();
+        let before = tables.tokens.len() + tables.attempts.len() + tables.requests.len();
+        tables
+            .tokens
+            .retain(|token| token.obtained_at >= tokens_before);
+        tables
+            .attempts
+            .retain(|attempt| attempt.started_at >= history_before);
+        tables
+            .requests
+            .retain(|request| request.at >= history_before);
+        let after = tables.tokens.len() + tables.attempts.len() + tables.requests.len();
+        u64::try_from(before - after).unwrap_or(0)
+    }
+
     pub fn record_request(&self, request: &RequestRecord) -> Result<()> {
         bounded(&mut self.tables().requests, request.clone());
         Ok(())

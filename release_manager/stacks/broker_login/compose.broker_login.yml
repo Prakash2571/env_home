@@ -68,8 +68,9 @@ services:
     security_opt:
       - no-new-privileges:true
     init: true
-    env_file:
-      - .env
+    # Only its own three variables, never env_file: the full .env holds the
+    # encryption key, PINs and seeds, which must not sit beside the ciphertext.
+    # Compose reads them from the .env beside this file for substitution.
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-broker_login}
       POSTGRES_USER: ${POSTGRES_USER:-broker_login}

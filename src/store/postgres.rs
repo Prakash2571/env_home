@@ -158,6 +158,31 @@ impl PgStore {
         Ok(u32::try_from(row.get::<_, i64>(0)).unwrap_or(u32::MAX))
     }
 
+    pub async fn prune(&self, history_before: i64, tokens_before: i64) -> Result<u64> {
+        let client = self.client().await?;
+        let history = moment(history_before)?;
+        let mut removed = 0;
+        removed += client
+            .execute("DELETE FROM token_requests WHERE at < $1", &[&history])
+            .await
+            .context("could not prune token requests")?;
+        removed += client
+            .execute(
+                "DELETE FROM login_attempts WHERE started_at < $1",
+                &[&history],
+            )
+            .await
+            .context("could not prune login attempts")?;
+        removed += client
+            .execute(
+                "DELETE FROM broker_tokens WHERE obtained_at < $1",
+                &[&moment(tokens_before)?],
+            )
+            .await
+            .context("could not prune old tokens")?;
+        Ok(removed)
+    }
+
     pub async fn record_request(&self, request: &RequestRecord) -> Result<()> {
         self.client()
             .await?

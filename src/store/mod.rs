@@ -7,6 +7,9 @@ use serde::Serialize;
 pub use memory::MemoryStore;
 pub use postgres::PgStore;
 
+pub const KEEP_HISTORY_SECONDS: i64 = 90 * 86_400;
+pub const KEEP_TOKENS_SECONDS: i64 = 30 * 86_400;
+
 pub const MIGRATIONS: [(i32, &str); 1] = [(1, include_str!("../../migrations/0001_init.sql"))];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -94,6 +97,15 @@ impl Store {
         match self {
             Self::Memory(store) => Ok(store.recent_requests(limit)),
             Self::Postgres(store) => store.recent_requests(limit).await,
+        }
+    }
+
+    pub async fn prune(&self, now: i64) -> Result<u64> {
+        let history = now - KEEP_HISTORY_SECONDS;
+        let tokens = now - KEEP_TOKENS_SECONDS;
+        match self {
+            Self::Memory(store) => Ok(store.prune(history, tokens)),
+            Self::Postgres(store) => store.prune(history, tokens).await,
         }
     }
 

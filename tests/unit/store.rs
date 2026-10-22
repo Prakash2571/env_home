@@ -165,3 +165,56 @@ fn every_migration_is_embedded_in_order() {
             .contains("CREATE TABLE IF NOT EXISTS broker_tokens")
     );
 }
+
+async fn prunes_past_retention(store: Store, base: i64) {
+    let alias = format!("prune{base}");
+    let now = base + KEEP_HISTORY_SECONDS + 10;
+    store.save_token(&token(&alias, base)).await.unwrap();
+    store.save_token(&token(&alias, now - 60)).await.unwrap();
+    store
+        .record_attempt(&attempt(&alias, base, true))
+        .await
+        .unwrap();
+    let mut old = request(base, "served");
+    old.client_id.clone_from(&alias);
+    store.record_request(&old).await.unwrap();
+    assert!(store.prune(now).await.unwrap() >= 3);
+    assert_eq!(
+        store
+            .latest_token(&alias)
+            .await
+            .unwrap()
+            .unwrap()
+            .obtained_at,
+        now - 60,
+        "the current token survives"
+    );
+    assert!(
+        store
+            .recent_attempts(10_000)
+            .await
+            .unwrap()
+            .iter()
+            .all(|row| row.alias != alias)
+    );
+    assert!(
+        store
+            .recent_requests(10_000)
+            .await
+            .unwrap()
+            .iter()
+            .all(|row| row.client_id != alias)
+    );
+}
+
+#[tokio::test]
+async fn history_and_old_tokens_are_pruned_but_the_current_token_is_kept() {
+    prunes_past_retention(Store::Memory(MemoryStore::default()), 1_700_000_000).await;
+    if let Ok(url) = std::env::var("CBL_TEST_DATABASE_URL") {
+        prunes_past_retention(
+            Store::Postgres(PgStore::new(&url)),
+            1_600_000_000 + i64::from(std::process::id() % 1000),
+        )
+        .await;
+    }
+}

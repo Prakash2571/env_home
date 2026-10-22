@@ -77,13 +77,19 @@ impl Scheduler {
         }
     }
 
-    fn roll_day(&mut self, now: i64) {
+    async fn roll_day(&mut self, now: i64) {
         let today = ist_day_number(now);
-        if self.ledger.day != today {
-            self.ledger = DayLedger {
-                day: today,
-                ..DayLedger::default()
-            };
+        if self.ledger.day == today {
+            return;
+        }
+        self.ledger = DayLedger {
+            day: today,
+            ..DayLedger::default()
+        };
+        match self.engine.vault().store().prune(now).await {
+            Ok(0) => {}
+            Ok(removed) => tracing::info!(removed, "pruned rows past their retention"),
+            Err(error) => tracing::warn!(%error, "could not prune old rows"),
         }
     }
 
@@ -112,7 +118,7 @@ impl Scheduler {
 
     pub async fn tick(&mut self) -> Duration {
         let now = (self.now)();
-        self.roll_day(now);
+        self.roll_day(now).await;
         if self.window.is_open(now) {
             self.ledger.saw_window = true;
             let due = self.due().await;

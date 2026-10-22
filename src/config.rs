@@ -11,7 +11,7 @@ pub const DEFAULT_DHAN_AUTH_BASE: &str = "https://auth.dhan.co";
 pub const DEFAULT_TELEGRAM_API: &str = "https://api.telegram.org";
 const ALIAS_MAX: usize = 32;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Account {
     pub alias: String,
     pub client_id: String,
@@ -30,7 +30,7 @@ pub enum StoreConfig {
     Postgres(String),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct TelegramConfig {
     pub bot_token: String,
     pub chat_id: String,
@@ -49,7 +49,7 @@ pub struct AdminPolicy {
     pub allowed_emails: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Config {
     pub http_addr: SocketAddr,
     pub home: PathBuf,
@@ -63,6 +63,41 @@ pub struct Config {
     pub window: LoginWindow,
     pub api: ApiPolicy,
     pub admin: AdminPolicy,
+}
+
+impl std::fmt::Debug for Account {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Account")
+            .field("alias", &self.alias)
+            .field("client_id", &crate::state::client_id_hint(&self.client_id))
+            .field("api_seed_shared", &self.api_seed_shared)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for TelegramConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TelegramConfig")
+            .field("chat_id", &self.chat_id)
+            .field("api_base", &self.api_base)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Config")
+            .field("http_addr", &self.http_addr)
+            .field("accounts", &self.accounts)
+            .field("redirect_url", &self.redirect_url.as_str())
+            .field("sidecar_url", &self.sidecar_url)
+            .field("telegram", &self.telegram)
+            .field("window", &self.window.label())
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

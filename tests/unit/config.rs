@@ -219,3 +219,31 @@ fn basics_fall_back_when_unset() {
     assert_eq!(basics.http_addr.to_string(), DEFAULT_HTTP_ADDR);
     assert_eq!(basics.home, PathBuf::from("."));
 }
+
+#[test]
+fn debug_output_never_carries_a_secret() {
+    let config = load_from(&complete()).unwrap();
+    let printed = format!("{config:?}");
+    for secret in [
+        KEY,
+        "pw",
+        "secret",
+        "123456",
+        DHAN_SEED,
+        "1100000001",
+        "9999999999",
+    ] {
+        assert!(
+            !printed.contains(secret),
+            "{secret} leaked into Debug output: {printed}"
+        );
+    }
+    assert!(printed.contains("main") && printed.contains("••••0001"));
+    let session = crate::dhan::Session {
+        client_id: "1100000001".into(),
+        access_token: "eyJ.secret".into(),
+        expires_at: 2,
+        obtained_at: 1,
+    };
+    assert!(!format!("{session:?}").contains("eyJ.secret"));
+}

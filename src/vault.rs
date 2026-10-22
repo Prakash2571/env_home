@@ -20,8 +20,11 @@ pub struct OpenToken {
     pub expires_at: i64,
 }
 
-fn binding(account: &Account) -> String {
-    format!("{}:{}", account.alias, account.client_id)
+fn binding(account: &Account, obtained_at: i64, expires_at: i64) -> String {
+    format!(
+        "{}:{}:{obtained_at}:{expires_at}",
+        account.alias, account.client_id
+    )
 }
 
 impl Vault {
@@ -42,9 +45,10 @@ impl Vault {
         let token = StoredToken {
             alias: account.alias.clone(),
             client_id: account.client_id.clone(),
-            sealed: self
-                .cipher
-                .encrypt(&session.access_token, &binding(account))?,
+            sealed: self.cipher.encrypt(
+                &session.access_token,
+                &binding(account, session.obtained_at, session.expires_at),
+            )?,
             obtained_at: session.obtained_at,
             expires_at: session.expires_at,
             drive: drive.to_owned(),
@@ -68,7 +72,10 @@ impl Vault {
         if token.expires_at <= now.saturating_add(EXPIRY_MARGIN_SECONDS) {
             return Ok(None);
         }
-        let access_token = self.cipher.decrypt(&token.sealed, &binding(account))?;
+        let access_token = self.cipher.decrypt(
+            &token.sealed,
+            &binding(account, token.obtained_at, token.expires_at),
+        )?;
         Ok(Some(OpenToken {
             access_token,
             obtained_at: token.obtained_at,

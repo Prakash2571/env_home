@@ -19,10 +19,10 @@ services:
         condition: service_healthy
   postgres:
     image: postgres:17-alpine
-    env_file: .env
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-broker_login}
       POSTGRES_USER: ${POSTGRES_USER:-broker_login}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
