@@ -22,7 +22,7 @@ A small, self-hosted Next.js app for keeping environment variables in named grou
 1. Create a PostgreSQL database and a user with permission to create tables in it.
 2. Copy `.env.example` to `.env`, then set:
    - `DATABASE_URL`: the PostgreSQL connection string
-   - `ADMIN_PASSWORD`: a long, random admin password (minimum 16 characters)
+   - `ADMIN_PASSWORD`: your chosen admin password (any non-empty length)
    - `AUTH_SECRET`: a random string of at least 32 characters
    - `ENCRYPTION_KEY`: 32 random bytes encoded as 64 hex characters
 3. Generate the last two values with `openssl rand -hex 32` (use a separate result for each).

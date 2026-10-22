@@ -18,7 +18,7 @@ function signature(expires: string): string {
 
 export function checkPassword(value: string): boolean {
   const expected = process.env.ADMIN_PASSWORD;
-  if (!expected || expected.length < 16) throw new Error("ADMIN_PASSWORD must be at least 16 characters");
+  if (expected === undefined || expected.length === 0) throw new Error("ADMIN_PASSWORD must be set");
   return safeEqual(value, expected);
 }
 
