@@ -71,8 +71,9 @@
 }
 
 .notice {
-  background: var(--nested);
-  border-left: 3px solid var(--running);
+  background: color-mix(in srgb, var(--running) 8%, var(--nested));
+  border: 1px solid color-mix(in srgb, var(--running) 35%, var(--faint));
+  border-radius: var(--radius);
   padding: 8px 12px;
 }
 
