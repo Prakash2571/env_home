@@ -1,0 +1,37 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: env_home
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: env_home
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U env_home"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://env_home:test_password@localhost:5432/env_home
+      ADMIN_PASSWORD: ci-only-test-password-long
+      AUTH_SECRET: ci-only-auth-secret-that-is-long-enough
+      ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm run db:setup
+      - run: npm run build
+      - run: npm start &
+      - run: node tests/smoke.mjs
