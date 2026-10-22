@@ -3,7 +3,77 @@ on:
   push:
   pull_request:
 jobs:
-  build:
+  service:
+    name: Rust service
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: broker_login
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: broker_login
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U broker_login"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CBL_TEST_DATABASE_URL: host=127.0.0.1 port=5432 user=broker_login password=ci_password dbname=broker_login
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  console:
+    name: Dashboard and sidecar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --no-fund --no-audit
+        working-directory: ui
+      - run: npm run typecheck
+        working-directory: ui
+      - run: npm test
+        working-directory: ui
+      - run: npm run build
+        working-directory: ui
+      - run: node --test tests/sidecar/*.test.mjs
+
+  release:
+    name: Release scripts and image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: for f in release_manager/status.sh release_manager/lib/*.sh release_manager/stacks/*/*.sh; do bash -n "$f"; done
+      - name: Path contract
+        run: |
+          RM_DIR=$PWD/release_manager bash -c 'source release_manager/lib/stacks.sh; source release_manager/lib/hosts.sh; source release_manager/lib/paths.sh; host_use beonedge; paths_validate broker_login "$(stack_paths_file broker_login)"'
+      - name: Env examples declare the same keys
+        run: diff <(grep -oE '^[A-Z_]+=' config/env.example | sort) <(grep -oE '^[A-Z_]+=' release_manager/stacks/broker_login/.env.example | sort)
+      - name: Image builds and starts unconfigured
+        run: |
+          docker build -t cbl-app:ci .
+          docker run -d --name cbl-ci cbl-app:ci
+          sleep 5
+          docker logs cbl-ci 2>&1 | grep -q 'configuration incomplete'
+          docker logs cbl-ci 2>&1 | grep -q 'serving the console from /app/ui/dist'
+          test "$(docker inspect -f '{{.State.Status}}' cbl-ci)" = running
+          test "$(docker run --rm --entrypoint id cbl-app:ci -un)" != root
+
+  legacy:
+    name: Legacy Next.js env store (kept until D7 is decided)
     runs-on: ubuntu-latest
     services:
       postgres:

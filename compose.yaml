@@ -1,0 +1,49 @@
+# Local development only. The deployed stack is
+# release_manager/stacks/broker_login/compose.broker_login.yml.
+#
+#   cp config/env.example .env   # and fill it in
+#   docker compose up --build
+services:
+  app:
+    build: .
+    image: cbl-app:local
+    env_file: .env
+    environment:
+      CBL_HTTP_ADDR: 0.0.0.0:47440
+      CBL_DATABASE_HOST: postgres
+      CBL_SIDECAR_URL: http://login:8090/login
+    ports:
+      - "127.0.0.1:47440:47440"
+    depends_on:
+      postgres:
+        condition: service_healthy
+  postgres:
+    image: postgres:17-alpine
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-broker_login}
+      POSTGRES_USER: ${POSTGRES_USER:-broker_login}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
+    volumes:
+      - dev-postgres:/var/lib/postgresql/data
+  login:
+    image: mcr.microsoft.com/playwright:v1.63.0-noble
+    init: true
+    environment:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PORT: "8090"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - cd /opt/node && { [ -d node_modules/playwright ] || npm install --no-save
+        --no-package-lock --no-audit --no-fund playwright@1.63.0 ; } &&
+        cp /srv/sidecar/*.mjs /opt/node/ && exec node /opt/node/server.mjs
+    volumes:
+      - ./sidecar:/srv/sidecar:ro
+      - dev-login-modules:/opt/node
+    shm_size: 256m
+volumes:
+  dev-postgres:
+  dev-login-modules:
