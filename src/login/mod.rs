@@ -22,7 +22,6 @@ use crate::vault::{Vault, token_view};
 
 pub const CONSENTS_PER_DAY: u32 = 25;
 pub const MANUAL_TIMEOUT: Duration = Duration::from_secs(300);
-const MAX_REJECTED_CALLBACKS: u32 = 5;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -395,7 +394,6 @@ impl LoginEngine {
             "waiting for the consent page to redirect back",
         );
         let deadline = tokio::time::Instant::now() + self.parts.manual_timeout;
-        let mut rejected = 0;
         loop {
             let Ok(candidate) = tokio::time::timeout_at(deadline, candidates.recv()).await else {
                 live.stage(
@@ -417,11 +415,7 @@ impl LoginEngine {
             );
             match self.exchange(account, &token_id).await {
                 Ok(session) => return Ok(session),
-                Err(failure) => {
-                    rejected += 1;
-                    if rejected >= MAX_REJECTED_CALLBACKS {
-                        return Err(failure);
-                    }
+                Err(_) => {
                     live.stage(
                         alias,
                         StageId::Callback,

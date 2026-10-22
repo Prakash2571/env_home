@@ -1,5 +1,8 @@
-use axum::extract::{RawQuery, State};
-use axum::http::{StatusCode, header};
+use std::net::SocketAddr;
+
+use axum::Extension;
+use axum::extract::{ConnectInfo, RawQuery, State};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use serde_json::json;
 
@@ -41,7 +44,12 @@ fn page(title: &str, body: &str) -> Html<String> {
     ))
 }
 
-pub async fn dhan_callback(State(context): State<Context>, RawQuery(query): RawQuery) -> Response {
+pub async fn dhan_callback(
+    State(context): State<Context>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
+    headers: HeaderMap,
+    RawQuery(query): RawQuery,
+) -> Response {
     let Some(running) = &context.running else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -51,7 +59,13 @@ pub async fn dhan_callback(State(context): State<Context>, RawQuery(query): RawQ
     };
     let gate = running.engine.gate();
     let waiting = gate.waiting_for();
-    match gate.deliver(query.as_deref().unwrap_or_default()) {
+    let source = super::token::client_ip(
+        &headers,
+        peer.map(|Extension(ConnectInfo(address))| address),
+        running.api.client_ip_header.as_deref(),
+    )
+    .unwrap_or_else(|| "unknown".into());
+    match gate.deliver(query.as_deref().unwrap_or_default(), &source) {
         Delivery::Accepted => {
             if let Some(alias) = waiting.as_deref() {
                 running.engine.live().note(

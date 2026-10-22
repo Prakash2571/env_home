@@ -83,7 +83,7 @@ impl Reply {
     }
 }
 
-fn client_ip(
+pub(super) fn client_ip(
     headers: &HeaderMap,
     peer: Option<SocketAddr>,
     header_name: Option<&str>,

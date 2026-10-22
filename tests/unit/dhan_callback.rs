@@ -54,33 +54,76 @@ fn a_configured_query_must_come_back_unchanged() {
 #[tokio::test]
 async fn the_gate_accepts_only_while_a_login_waits_and_closes_when_dropped() {
     let gate = CallbackGate::new(redirect());
-    assert_eq!(gate.deliver("tokenId=early"), Delivery::NoLoginPending);
+    assert_eq!(
+        gate.deliver("tokenId=early", "203.0.113.9"),
+        Delivery::NoLoginPending
+    );
     assert_eq!(gate.waiting_for(), None);
 
     let mut ticket = gate.open("main");
     assert_eq!(gate.waiting_for().as_deref(), Some("main"));
     assert_eq!(
-        gate.deliver("garbage"),
+        gate.deliver("garbage", "203.0.113.9"),
         Delivery::Invalid,
         "a malformed callback does not end the login"
     );
-    assert_eq!(gate.deliver("tokenId=good"), Delivery::Accepted);
+    assert_eq!(
+        gate.deliver("tokenId=good", "203.0.113.9"),
+        Delivery::Accepted
+    );
     assert_eq!(ticket.candidates.recv().await.as_deref(), Some("good"));
 
     drop(ticket);
-    assert_eq!(gate.deliver("tokenId=late"), Delivery::NoLoginPending);
+    assert_eq!(
+        gate.deliver("tokenId=late", "203.0.113.9"),
+        Delivery::NoLoginPending
+    );
     assert_eq!(
         gate.redirect().as_str(),
         "https://login.example.in/dhan/callback"
     );
 }
 
+#[tokio::test]
+async fn a_spammer_cannot_block_the_real_callback_from_another_source() {
+    let gate = CallbackGate::new(redirect());
+    let mut ticket = gate.open("main");
+    for _ in 0..MAX_ATTEMPTS_PER_SOURCE {
+        assert_eq!(
+            gate.deliver("tokenId=bogus", "203.0.113.66"),
+            Delivery::Accepted
+        );
+    }
+    assert_eq!(
+        gate.deliver("tokenId=more", "203.0.113.66"),
+        Delivery::TooManyAttempts,
+        "one source gets five tries per login"
+    );
+    assert_eq!(
+        gate.deliver("tokenId=real", "198.51.100.20"),
+        Delivery::Accepted,
+        "the operator's browser on another IP still gets through"
+    );
+    assert_eq!(ticket.candidates.recv().await.as_deref(), Some("bogus"));
+    assert_eq!(
+        ticket.candidates.recv().await.as_deref(),
+        Some("real"),
+        "a repeated tokenId is queued once, so it costs one exchange"
+    );
+}
+
 #[test]
-fn the_gate_caps_attempts_so_the_public_route_is_not_a_proxy() {
+fn the_gate_caps_attempts_overall_so_the_public_route_is_not_a_proxy() {
     let gate = CallbackGate::new(redirect());
     let _ticket = gate.open("main");
-    for _ in 0..20 {
-        assert_eq!(gate.deliver("bad"), Delivery::Invalid);
+    for index in 0..MAX_ATTEMPTS {
+        assert_eq!(
+            gate.deliver("bad", &format!("10.0.{}.{}", index / 250, index % 250)),
+            Delivery::Invalid
+        );
     }
-    assert_eq!(gate.deliver("tokenId=good"), Delivery::TooManyAttempts);
+    assert_eq!(
+        gate.deliver("tokenId=good", "198.51.100.20"),
+        Delivery::TooManyAttempts
+    );
 }

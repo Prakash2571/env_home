@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Result, bail};
@@ -7,8 +8,10 @@ use tokio::sync::mpsc;
 use super::is_valid_token;
 
 const MAX_CALLBACK_BYTES: usize = 8192;
-const MAX_ATTEMPTS: u32 = 20;
-const CANDIDATE_QUEUE: usize = 8;
+pub const MAX_ATTEMPTS_PER_SOURCE: u32 = 5;
+pub const MAX_ATTEMPTS: u32 = 200;
+const MAX_SOURCES: usize = 1_000;
+const CANDIDATE_QUEUE: usize = 32;
 
 pub fn parse_redirect(value: &str) -> Result<Url> {
     let raw = value.trim();
@@ -58,6 +61,8 @@ struct Pending {
     alias: String,
     sender: mpsc::Sender<String>,
     attempts: u32,
+    per_source: HashMap<String, u32>,
+    seen: HashSet<String>,
 }
 
 #[derive(Clone)]
@@ -98,6 +103,8 @@ impl CallbackGate {
                 alias: alias.to_owned(),
                 sender,
                 attempts: 0,
+                per_source: HashMap::new(),
+                seen: HashSet::new(),
             });
         }
         GateTicket {
@@ -114,18 +121,25 @@ impl CallbackGate {
             .map(|pending| pending.alias.clone())
     }
 
-    pub fn deliver(&self, query: &str) -> Delivery {
+    pub fn deliver(&self, query: &str, source: &str) -> Delivery {
         let Ok(mut guard) = self.pending.lock() else {
             return Delivery::NoLoginPending;
         };
         let Some(pending) = guard.as_mut() else {
             return Delivery::NoLoginPending;
         };
-        if pending.attempts >= MAX_ATTEMPTS {
+        let source = crate::api::guard::source_key(source);
+        let from_source = pending.per_source.get(&source).copied().unwrap_or(0);
+        if pending.attempts >= MAX_ATTEMPTS
+            || from_source >= MAX_ATTEMPTS_PER_SOURCE
+            || (from_source == 0 && pending.per_source.len() >= MAX_SOURCES)
+        {
             return Delivery::TooManyAttempts;
         }
         pending.attempts += 1;
+        pending.per_source.insert(source, from_source + 1);
         match callback_token(query, &self.redirect) {
+            Ok(token_id) if !pending.seen.insert(token_id.clone()) => Delivery::Accepted,
             Ok(token_id) => match pending.sender.try_send(token_id) {
                 Ok(()) => Delivery::Accepted,
                 Err(_) => Delivery::TooManyAttempts,
