@@ -1,6 +1,6 @@
 # Build plan: broker login and token service
 
-Status: **proposed, waiting for approval.** Written 2026-10-22 on branch `tamagami-hi/dev`.
+Status: **approved 2026-10-22; built on `tamagami-hi/dev` (see [build-log.md](build-log.md)).** Decisions D1–D9 stay open in [decisions.md](decisions.md). Section 8 below describes the state when the plan was written.
 
 ## 1. What this service is
 
