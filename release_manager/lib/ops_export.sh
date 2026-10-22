@@ -197,7 +197,8 @@ export_accept_image() {
 }
 
 export_stage_files() {
-    local stack="$1" paths_file="$2" bundle="$3" src="$RM_DIR/stacks/$stack"
+    local stack="$1" paths_file="$2" bundle="$3"
+    local src="$RM_DIR/stacks/$stack"
     local compose_name deploy_name rollback_name guide_name
     compose_name="$(stack_attr "$stack" compose)"
     deploy_name="$(stack_attr "$stack" deploy)"
