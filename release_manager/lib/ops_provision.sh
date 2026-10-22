@@ -86,11 +86,12 @@ set -euo pipefail
 for dir in "$@"; do
     [[ -n "$dir" && "$dir" == /* ]] || { printf 'refusing path: %s\n' "$dir" >&2; exit 1; }
     mkdir -p -- "$dir"
-    # The dumps hold every encrypted token; nothing else needs to be private
-    # beyond the deploy user's default.
+    # Dumps hold every encrypted token; captured logs may hold account names
+    # and broker errors. Neither is for other users on a shared box.
     case "$dir" in
-        */db) chmod 700 -- "$dir" ;;
-        *)    chmod 755 -- "$dir" ;;
+        */db)            chmod 700 -- "$dir" ;;
+        */logs|*/logs/*) chmod 750 -- "$dir" ;;
+        *)               chmod 755 -- "$dir" ;;
     esac
     printf '  %s\n' "$dir"
 done

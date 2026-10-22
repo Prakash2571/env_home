@@ -69,10 +69,10 @@ op_containers() {
     project="$(paths_get "$paths_file" .vps.compose_project)" || exit 1
     container="$(paths_get "$paths_file" .vps.app_container)" || exit 1
     step "containers in project $project"
-    cbl_ssh "docker ps -a --filter label=com.docker.compose.project=$project --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'"
+    cbl_ssh "docker ps -a --filter 'label=com.docker.compose.project=$project' --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'"
     printf '\n'
     step "last 40 lines from $container"
-    cbl_ssh "docker logs --tail 40 $container 2>&1 || echo 'not running'"
+    cbl_ssh "docker logs --tail 40 '$container' 2>&1 || echo 'not running'"
 }
 
 # op_diagnose <paths.json> — the readiness check. Counts blockers and names the

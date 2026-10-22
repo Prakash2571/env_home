@@ -22,10 +22,15 @@ services:
     image: cbl-app:${CBL_VERSION:?CBL_VERSION must be set by the deploy script}
     container_name: cbl-app
     restart: unless-stopped
-    # The image runs as uid 10001; this stops a setuid binary inside the
-    # container from raising privileges.
+    # The image runs as uid 10001. The app needs no capability and writes
+    # nothing outside its data volume, so the root filesystem is read-only.
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
     env_file:
       - .env
     environment:

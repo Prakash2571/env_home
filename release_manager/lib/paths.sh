@@ -42,6 +42,10 @@ paths_get_opt() {
 
 _paths_absolute_under() {
     local key="$1" value="$2" parent="${3:-}"
+    # Contract values are interpolated into single-quoted remote commands, so
+    # a quote, a space or a $ here would be an injection on the VPS. Only the
+    # plain path alphabet is allowed.
+    [[ "$value" =~ ^/[A-Za-z0-9_./-]+$ ]] || { printf '%s has characters outside [A-Za-z0-9_./-]: %s\n' "$key" "$value" >&2; return 1; }
     [[ "$value" == /* ]]     || { printf '%s must be absolute: %s\n' "$key" "$value" >&2; return 1; }
     [[ "$value" != *".."* ]] || { printf '%s must not contain ..: %s\n' "$key" "$value" >&2; return 1; }
     [[ -z "$parent" || "$value" == "$parent"/* ]] || {
@@ -105,7 +109,14 @@ paths_validate() {
                .vps.compose_project .vps.docker .vps.data_volume \
                .environment .short
     do
-        paths_get "$file" "$key" >/dev/null || return 1
+        value="$(paths_get "$file" "$key")" || return 1
+        [[ "$value" =~ ^[A-Za-z0-9_.-]+$ ]] || {
+            printf '%s must be a plain name [A-Za-z0-9_.-]: %s\n' "$key" "$value" >&2; return 1; }
+    done
+    for key in .vps.login_container .database.container; do
+        value="$(paths_get_opt "$file" "$key")"
+        [[ -z "$value" || "$value" =~ ^[A-Za-z0-9_.-]+$ ]] || {
+            printf '%s must be a plain name [A-Za-z0-9_.-]: %s\n' "$key" "$value" >&2; return 1; }
     done
 
     # At least one image, each with a key and an archive filename. The archive
