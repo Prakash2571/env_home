@@ -218,3 +218,38 @@ async fn history_and_old_tokens_are_pruned_but_the_current_token_is_kept() {
         .await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn services_starting_together_on_an_empty_database_all_migrate_it() {
+    let Ok(url) = std::env::var("CBL_TEST_DATABASE_URL") else {
+        eprintln!("CBL_TEST_DATABASE_URL is not set; the concurrent migration test is skipped");
+        return;
+    };
+    let schema = format!("migrate_race_{}", std::process::id());
+    let (admin, connection) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+        .await
+        .unwrap();
+    tokio::spawn(connection);
+    admin
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema}"
+        ))
+        .await
+        .unwrap();
+
+    let scoped = format!("{url} options=-csearch_path={schema}");
+    let starts = (0..6).map(|_| {
+        let store = Store::Postgres(PgStore::new(&scoped));
+        tokio::spawn(async move { store.is_reachable().await })
+    });
+    let reachable = futures_util::future::join_all(starts).await;
+
+    admin
+        .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+        .await
+        .unwrap();
+    assert!(
+        reachable.into_iter().all(|started| started.unwrap()),
+        "every service that starts at once must come up"
+    );
+}

@@ -35,7 +35,7 @@ impl PgStore {
         if let Some(client) = slot.as_ref().filter(|client| !client.is_closed()) {
             return Ok(Arc::clone(client));
         }
-        let (client, connection) = tokio_postgres::connect(&self.params, NoTls)
+        let (mut client, connection) = tokio_postgres::connect(&self.params, NoTls)
             .await
             .context("could not connect to Postgres")?;
         tokio::spawn(async move {
@@ -43,7 +43,7 @@ impl PgStore {
                 tracing::warn!(%error, "the Postgres connection ended");
             }
         });
-        migrate(&client).await?;
+        migrate(&mut client).await?;
         let client = Arc::new(client);
         *slot = Some(Arc::clone(&client));
         Ok(client)
@@ -226,15 +226,28 @@ impl PgStore {
     }
 }
 
-async fn migrate(client: &Client) -> Result<()> {
-    client
+/// Any fixed key works; it only has to be the same for every instance of this service.
+const MIGRATION_LOCK: i64 = 0x0000_6272_6f6b_6572;
+
+/// Runs every pending migration in one transaction behind an advisory lock, so
+/// instances starting together take turns instead of racing on the catalog.
+async fn migrate(client: &mut Client) -> Result<()> {
+    let transaction = client
+        .transaction()
+        .await
+        .context("could not start the migration transaction")?;
+    transaction
+        .execute("SELECT pg_advisory_xact_lock($1)", &[&MIGRATION_LOCK])
+        .await
+        .context("could not take the migration lock")?;
+    transaction
         .batch_execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())",
         )
         .await
         .context("could not create schema_migrations")?;
     for (version, sql) in MIGRATIONS {
-        let applied = client
+        let applied = transaction
             .query_opt(
                 "SELECT 1 FROM schema_migrations WHERE version = $1",
                 &[&version],
@@ -245,13 +258,21 @@ async fn migrate(client: &Client) -> Result<()> {
         if applied {
             continue;
         }
-        client
-            .batch_execute(&format!(
-                "BEGIN; {sql}; INSERT INTO schema_migrations (version) VALUES ({version}); COMMIT;"
-            ))
+        transaction
+            .batch_execute(sql)
             .await
             .with_context(|| format!("migration {version} failed"))?;
+        transaction
+            .execute(
+                "INSERT INTO schema_migrations (version) VALUES ($1)",
+                &[&version],
+            )
+            .await
+            .with_context(|| format!("could not record migration {version}"))?;
         tracing::info!(version, "applied a database migration");
     }
-    Ok(())
+    transaction
+        .commit()
+        .await
+        .context("could not commit the migrations")
 }

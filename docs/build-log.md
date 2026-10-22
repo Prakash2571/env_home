@@ -2,6 +2,10 @@
 
 **What is built, what was verified, and what is open.** A new dated section after every change lands, newest first. The commit bodies carry the detail; this is the map.
 
+## 2026-10-22 (evening): CI's first push of the branch
+
+The Rust job failed on its empty Postgres: two tests opened the store at once and raced on `CREATE TABLE IF NOT EXISTS`, so one start was refused. Local runs passed only because the database was already migrated. Two instances starting together on the VPS could hit the same race, so the fix is in the store, not the tests: all pending migrations now run in one transaction behind `pg_advisory_xact_lock`. A new test starts six stores together on an empty schema and fails without the lock. 127 Rust tests pass on a fresh database.
+
 ## 2026-10-22 (later): security review fixes
 
 A security review of the whole branch found no critical issues. It found one HIGH and eight MEDIUM issues, all addressed in commits `4b003bb`, `35fc176`, `4480944`, `7ef9ba5`, `86fc454` and `022bc72`:
