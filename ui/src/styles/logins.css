@@ -1,0 +1,176 @@
+/* The Logins tab: the overview band, one full-width row per account with its
+   flow chart, and the logs underneath. */
+
+.overview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 20px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 12px var(--pad);
+  margin-bottom: var(--gap);
+}
+
+.overview--ok {
+  border-color: color-mix(in srgb, var(--done) 40%, var(--rule));
+}
+
+.overview-lead {
+  margin: 0;
+  font-size: var(--fs-value);
+}
+
+.overview-lead strong {
+  font-family: var(--mono);
+  font-size: var(--fs-lead);
+  margin-right: 4px;
+}
+
+.overview-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: var(--fs-body);
+}
+
+.fleet {
+  display: grid;
+  gap: var(--gap);
+  margin-bottom: var(--gap);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+  gap: 18px 28px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--pad) calc(var(--pad) + 4px);
+  min-width: 0;
+}
+
+.row--failed {
+  border-color: color-mix(in srgb, var(--failed) 45%, var(--rule));
+}
+
+.row--warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--rule));
+}
+
+.row--running {
+  border-color: color-mix(in srgb, var(--running) 45%, var(--rule));
+}
+
+.row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.row-id {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.row-id h2 {
+  margin: 0 0 2px;
+  font-size: var(--fs-value);
+  overflow-wrap: anywhere;
+}
+
+.row-id .mono {
+  font-size: var(--fs-label);
+}
+
+.token-life {
+  display: grid;
+  gap: 6px;
+  font-size: var(--fs-body);
+}
+
+.life-bar {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--faint);
+  overflow: hidden;
+}
+
+.life-fill {
+  display: block;
+  height: 100%;
+  background: var(--done);
+}
+
+.row-last {
+  display: grid;
+  gap: 2px;
+  font-size: var(--fs-label);
+  font-family: var(--mono);
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.row-actions .action {
+  padding: 6px 10px;
+}
+
+.row-flow {
+  min-width: 0;
+  align-self: center;
+}
+
+.row-flow .chain {
+  margin: 0;
+}
+
+.row-flow .consent,
+.row-flow .error,
+.row-flow .chain-note {
+  margin: 12px 0 0;
+}
+
+.chain-note {
+  font-size: var(--fs-label);
+  text-align: center;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--gap);
+  margin-bottom: var(--gap);
+}
+
+.table .detail {
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { requestLogin, testTelegram } from "./api/client";
 import type { Drive, Snapshot } from "./api/types";
 import { useSnapshot } from "./api/useSnapshot";
-import { AccountCard } from "./components/AccountCard";
+import { AccountRow } from "./components/AccountRow";
 import { AccountsPage } from "./components/AccountsPage";
 import { AttemptLog, EventLog, RequestLog } from "./components/Logs";
+import { Overview } from "./components/Overview";
 import { StatusStrip } from "./components/StatusStrip";
 
 function useNow(): number {
@@ -78,20 +79,23 @@ function Logins({ snapshot, now, busy, onLogin, onAdd }: LoginsProps) {
           ) : null}
         </section>
       ) : (
-        <section className="cards" aria-label="accounts">
-          {snapshot.accounts.map((account) => (
-            <AccountCard
-              key={account.alias}
-              account={account}
-              now={now}
-              automation={snapshot.automation}
-              busy={busy}
-              onLogin={onLogin}
-            />
-          ))}
-        </section>
+        <>
+          <Overview accounts={snapshot.accounts} window={snapshot.window} now={now} />
+          <section className="fleet" aria-label="accounts">
+            {snapshot.accounts.map((account) => (
+              <AccountRow
+                key={account.alias}
+                account={account}
+                now={now}
+                automation={snapshot.automation}
+                busy={busy}
+                onLogin={onLogin}
+              />
+            ))}
+          </section>
+        </>
       )}
-      <div className="grid">
+      <div className="split">
         <EventLog events={snapshot.events} />
         <RequestLog requests={snapshot.requests} />
       </div>

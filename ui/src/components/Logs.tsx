@@ -53,7 +53,9 @@ export function RequestLog({ requests }: { requests: RequestRecord[] }) {
                 <td>{request.alias ?? "unknown"}</td>
                 <td className="mono">{request.ip ?? "?"}</td>
                 <td className={request.outcome === "served" ? "tone-done" : "tone-failed"}>{request.outcome}</td>
-                <td>{request.reason}</td>
+                <td className="detail" title={request.reason}>
+                  {request.reason}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -91,7 +93,9 @@ export function AttemptLog({ attempts }: { attempts: AttemptRecord[] }) {
                 <td className={attempt.outcome === "ok" ? "tone-done" : "tone-failed"}>
                   {attempt.outcome === "ok" ? "ok" : `failed at ${attempt.stage}`}
                 </td>
-                <td>{attempt.detail}</td>
+                <td className="detail" title={attempt.detail}>
+                  {attempt.detail}
+                </td>
               </tr>
             ))}
           </tbody>

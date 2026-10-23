@@ -126,36 +126,12 @@
   overflow-wrap: anywhere;
 }
 
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
-  gap: var(--gap);
-  margin-bottom: var(--gap);
-}
-
-.card,
 .panel {
   background: var(--panel);
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   padding: var(--pad);
   min-width: 0;
-}
-
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--gap);
-}
-
-.card-head h2 {
-  margin: 0;
-  font-size: var(--fs-value);
-}
-
-.card-head p {
-  margin: 2px 0 0;
 }
 
 .pill {
@@ -168,34 +144,8 @@
   white-space: nowrap;
 }
 
-.facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
-  margin: 12px 0;
-}
-
-.facts dt {
-  font-size: var(--fs-label);
-  color: var(--dim);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.facts dd {
-  margin: 0;
-  font-family: var(--mono);
-}
-
 .consent {
   margin: 10px 0 0;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
-  gap: var(--gap);
-  margin-bottom: var(--gap);
 }
 
 .panel h3 {

@@ -38,7 +38,10 @@ export function StageChain({ stages, now }: StageChainProps) {
                 {STATUS_LABEL[stage.status]}
                 {took === null ? "" : ` · ${took}`}
               </span>
-              {stage.detail ? <span className="stage-detail">{stage.detail}</span> : null}
+              {/* Only where it matters now; a finished step keeps its detail in the tooltip. */}
+              {stage.detail && (stage.status === "running" || stage.status === "failed") ? (
+                <span className="stage-detail">{stage.detail}</span>
+              ) : null}
             </span>
           </li>
         );

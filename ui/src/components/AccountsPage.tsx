@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { removeAccount, rotateTokenSeed } from "../api/client";
 import type { AccountView, AddedAccount } from "../api/types";
-import { duration } from "../format";
-import { PHASE } from "./AccountCard";
+import { PHASE } from "./phase";
 import { AddAccountForm } from "./AddAccountForm";
 import { SeedReveal } from "./SeedReveal";
+import { TokenLife } from "./TokenLife";
 
 type Change = "remove" | "rotate";
 
@@ -80,14 +80,6 @@ function ConfirmRow({ pending, working, onConfirm, onCancel }: ConfirmRowProps) 
       </td>
     </tr>
   );
-}
-
-function tokenLeft(account: AccountView, now: number): string {
-  if (account.token === null) {
-    return "none";
-  }
-  const left = account.token.expires_at - now;
-  return left > 0 ? `valid for ${duration(left)}` : "expired";
 }
 
 interface AccountsPageProps {
@@ -166,7 +158,9 @@ export function AccountsPage({ accounts, loaded, now }: AccountsPageProps) {
                       <td className="mono">{account.alias}</td>
                       <td className="mono">{account.client_id_hint}</td>
                       <td className={`tone-${phase.tone}`}>{phase.label}</td>
-                      <td>{tokenLeft(account, now)}</td>
+                      <td className="token-cell">
+                      <TokenLife token={account.token} now={now} />
+                    </td>
                       <td className="row-actions">
                         <button
                           type="button"

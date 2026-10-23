@@ -1,7 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { AccountCard } from "../src/components/AccountCard";
+import { AccountRow } from "../src/components/AccountRow";
+import { Overview } from "../src/components/Overview";
 import { AttemptLog, EventLog, RequestLog } from "../src/components/Logs";
 import { StageChain } from "../src/components/StageChain";
 import { StatusStrip } from "../src/components/StatusStrip";
@@ -11,63 +12,113 @@ describe("StageChain", () => {
   it("draws every stage with its state and how long it took", () => {
     const chain = stages(["done", "running", "idle", "idle", "idle", "skipped"]);
     chain[0] = { ...chain[0]!, started_at: NOW - 5, finished_at: NOW - 3, detail: "consent generated" };
-    chain[1] = { ...chain[1]!, started_at: NOW - 12 };
+    chain[1] = { ...chain[1]!, started_at: NOW - 12, detail: "typing the PIN" };
     render(<StageChain stages={chain} now={NOW} />);
     const items = within(screen.getByRole("list", { name: "login stages" })).getAllByRole("listitem");
     expect(items).toHaveLength(6);
     expect(items[0]).toHaveClass("stage--done");
     expect(items[0]).toHaveTextContent("done · 2s");
-    expect(items[0]).toHaveTextContent("consent generated");
+    expect(items[0]).not.toHaveTextContent("consent generated");
+    expect(items[0], "a finished step keeps its detail in the tooltip").toHaveAttribute("title", "consent generated");
     expect(items[1]).toHaveTextContent("running · 12s");
+    expect(items[1], "a running step shows what it is doing").toHaveTextContent("typing the PIN");
     expect(items[2]).toHaveTextContent("waiting");
     expect(items[5]).toHaveTextContent("skipped");
     expect(items[5]).not.toHaveTextContent("·");
   });
 });
 
-describe("AccountCard", () => {
-  it("shows the token's remaining life and never the whole client ID", () => {
+describe("AccountRow", () => {
+  it("shows the token's remaining life, the last login and never the whole client ID", () => {
     const view = account({
       phase: "ready",
+      stages: stages(["done", "done", "done", "done", "done", "done"]),
       token: { obtained_at: NOW - 600, expires_at: NOW + 7200, drive: "scheduled" },
       last_served_at: NOW - 30,
     });
-    render(<AccountCard account={view} now={NOW} automation busy={false} onLogin={() => {}} />);
-    expect(screen.getByText("ready")).toBeInTheDocument();
-    expect(screen.getByText("valid for 2h 0m")).toBeInTheDocument();
-    expect(screen.getByText("30s ago")).toBeInTheDocument();
-    expect(screen.getByText(/client ••••0001/)).toBeInTheDocument();
+    render(<AccountRow account={view} now={NOW} automation busy={false} onLogin={() => {}} />);
+    const row = screen.getByRole("article", { name: "account main" });
+    expect(within(row).getByText("ready")).toBeInTheDocument();
+    expect(within(row).getByText("valid for 2h 0m")).toBeInTheDocument();
+    expect(within(row).getByText("served 30s ago")).toBeInTheDocument();
+    expect(within(row).getByText(/client ••••0001/)).toBeInTheDocument();
+    expect(within(row).getByText(/today .* IST · scheduled/)).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "login stages" }), "every account shows its flow chart").toBeInTheDocument();
+    expect(screen.queryByText(/not kept across a restart/), "its steps are known here").toBeNull();
   });
 
-  it("marks an expired token and offers the consent link after a failure", () => {
+  it("says why a ready account's chart is empty after a restart", () => {
+    const view = account({ phase: "ready", token: { obtained_at: NOW - 600, expires_at: NOW + 7200, drive: "scheduled" } });
+    render(<AccountRow account={view} now={NOW} automation busy={false} onLogin={() => {}} />);
+    expect(screen.getByText(/not kept across a restart; its token is/)).toBeInTheDocument();
+  });
+
+  it("shows a failure with its consent link and Dhan's error", () => {
     const view = account({
       phase: "stopped_for_today",
       last_error: "browser: Dhan said: Too many attempts",
       consent_url: "https://auth.dhan.co/login/consentApp-login?consentAppId=c-1",
       token: { obtained_at: NOW - 90_000, expires_at: NOW - 10, drive: "manual" },
     });
-    render(<AccountCard account={view} now={NOW} automation busy={false} onLogin={() => {}} />);
+    render(<AccountRow account={view} now={NOW} automation busy={false} onLogin={() => {}} />);
     expect(screen.getByText("stopped for today")).toBeInTheDocument();
     expect(screen.getByText("expired")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "login stages" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open the Dhan consent page" })).toHaveAttribute("rel", "noreferrer noopener");
     expect(screen.getByText(/Too many attempts/)).toBeInTheDocument();
   });
 
   it("asks for the right drive and disables what cannot run", async () => {
     const onLogin = vi.fn();
-    const { rerender } = render(<AccountCard account={account()} now={NOW} automation busy={false} onLogin={onLogin} />);
-    await userEvent.click(screen.getByRole("button", { name: "Run automated login" }));
-    await userEvent.click(screen.getByRole("button", { name: "Manual login" }));
+    const user = userEvent.setup();
+    const { rerender } = render(<AccountRow account={account()} now={NOW} automation busy={false} onLogin={onLogin} />);
+    await user.click(screen.getByRole("button", { name: "Run automated login" }));
+    await user.click(screen.getByRole("button", { name: "Manual login" }));
     expect(onLogin.mock.calls).toEqual([
       ["main", "automated"],
       ["main", "manual"],
     ]);
+    expect(screen.getByText("no token yet", { selector: ".token-life" })).toBeInTheDocument();
 
-    rerender(<AccountCard account={account()} now={NOW} automation={false} busy={false} onLogin={onLogin} />);
+
+    rerender(<AccountRow account={account()} now={NOW} automation={false} busy={false} onLogin={onLogin} />);
     expect(screen.getByRole("button", { name: "Run automated login" })).toBeDisabled();
-    rerender(<AccountCard account={account({ phase: "awaiting_callback" })} now={NOW} automation busy={false} onLogin={onLogin} />);
+    rerender(<AccountRow account={account({ phase: "awaiting_callback" })} now={NOW} automation busy={false} onLogin={onLogin} />);
     expect(screen.getByRole("button", { name: "Manual login" })).toBeDisabled();
-    expect(screen.getByText("No token stored for this account.")).toBeInTheDocument();
+  });
+});
+
+describe("Overview", () => {
+  it("counts the accounts with a valid token and the ones that need someone", () => {
+    const valid = { obtained_at: NOW - 60, expires_at: NOW + 3600, drive: "scheduled" };
+    const { rerender } = render(
+      <Overview
+        accounts={[
+          account({ alias: "a", phase: "ready", token: valid }),
+          account({ alias: "b", phase: "failed" }),
+          account({ alias: "c", phase: "logging_in" }),
+        ]}
+        window={{ label: "07:45-08:30 IST", open: false, opens_in: 3600, closes_in: 0 }}
+        now={NOW}
+      />,
+    );
+    const overview = screen.getByRole("region", { name: "overview" });
+    expect(overview).toHaveTextContent("1 of 3 accounts have a valid token");
+    expect(overview).toHaveTextContent("1 logging in");
+    expect(overview).toHaveTextContent("1 need attention");
+    expect(overview).not.toHaveClass("overview--ok");
+    expect(overview).toHaveTextContent("next login window in 1h 0m");
+
+    rerender(
+      <Overview
+        accounts={[account({ phase: "ready", token: valid })]}
+        window={{ label: "x", open: true, opens_in: 0, closes_in: 90 }}
+        now={NOW}
+      />,
+    );
+    expect(overview).toHaveTextContent("1 of 1 account has a valid token");
+    expect(overview).toHaveTextContent("login window open, 1m 30s left");
+    expect(overview).toHaveClass("overview--ok");
   });
 });
 

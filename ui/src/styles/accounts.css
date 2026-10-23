@@ -150,6 +150,10 @@
   white-space: nowrap;
 }
 
+.accounts-table .token-cell {
+  min-width: 150px;
+}
+
 .row-actions {
   display: flex;
   flex-wrap: wrap;
