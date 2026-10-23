@@ -37,8 +37,8 @@ What this service protects, who it protects it from, and where each control live
 
 - [ ] Verify `Cf-Access-Jwt-Assertion` (this also closes the local-process header forgery above) (RS256, team certificates, `aud` = the application's AUD tag) on the dashboard and token routes.
 - [ ] Cloudflare rate-limiting rule on `/api/v1/token`; Bot Fight Mode; block non-IN countries on `/api/v1` if every engine is in India.
-- [ ] Decide D4. If service tokens: set `CBL_API_REQUIRE_ACCESS_JWT=true`.
-- [ ] Decide D6 and set `CBL_ADMIN_EMAILS` as defence in depth behind the Access policy.
+- [x] Decide D4: service tokens (A12). Set `CBL_API_REQUIRE_ACCESS_JWT=true` in the VPS `.env`.
+- [x] Decide D6: only `beonedgellp@gmail.com` (A11). Set `CBL_ADMIN_EMAILS` to it as defence in depth.
 - [ ] Alert when `/health` stops answering (the box already runs a blackbox exporter: `boe-ms-blackbox`).
 - [ ] Rotate each token API seed on a schedule; record the dates in `docs/decisions.md`.
 - [ ] Review Telegram's lockout alerts weekly at first, to learn what normal looks like.

@@ -62,29 +62,29 @@ ssh -t beonedge 'sudo systemctl restart cloudflared && systemctl is-active cloud
 
 Until the app is deployed, `https://$CBL_HOST` answers 502 from nginx. **Create the Access applications (step 3) before the first deploy**, or the dashboard would be open to anyone. **Never** publish 47440 any other way.
 
-## Step 2: Google sign-in (Google Cloud Console)
+## Step 2: Google sign-in
 
-1. <https://console.cloud.google.com> → create or choose a project → **APIs & Services → OAuth consent screen**: User type *External*, app name "Broker Login", your support email. Publishing status can stay *Testing* if you add your own Google accounts as test users.
-2. **Credentials → Create credentials → OAuth client ID** → *Web application*.
-   - Authorised JavaScript origins: `https://<team-name>.cloudflareaccess.com`
-   - Authorised redirect URI: `https://<team-name>.cloudflareaccess.com/cdn-cgi/access/callback`
+**Already in place on this account (verified 2026-10-23):** Zero Trust → Integrations → Identity providers lists **Google**, used by the existing console. Nothing to do here. For a new account, the steps were:
 
-   `<team-name>` is in Zero Trust → Settings → Custom Pages.
-3. Copy the client ID and secret into **Zero Trust → Settings → Authentication → Login methods → Add → Google**, then **Test**.
+1. <https://console.cloud.google.com> → **APIs & Services → OAuth consent screen**: *External*, your support email; *Testing* is fine with your own accounts as test users.
+2. **Credentials → Create credentials → OAuth client ID** → *Web application*, with origin `https://<team-name>.cloudflareaccess.com` and redirect URI `https://<team-name>.cloudflareaccess.com/cdn-cgi/access/callback`.
+3. Zero Trust → Integrations → Identity providers → **Add → Google** with that client ID and secret, then **Test**.
 
-## Step 3: three Access applications
+## Step 3: three Access applications (done 2026-10-23)
 
-In **Zero Trust → Access → Applications → Add → Self-hosted**, create these. Access always matches the most specific path, so the order doesn't matter.
+Zero Trust → Access controls → Applications → **Create new application → Self-hosted and private**. Access matches the most specific path first, so the order doesn't matter. The three apps reuse the account's reusable policies (Access controls → Policies):
 
-| Name | Domain / path | Policy | Why |
+| App | Destination | Policy | Sign-in |
 | --- | --- | --- | --- |
-| Broker Login | `<subdomain>.beonedge.in` (whole host) | **Allow**, Include → Emails: your Google accounts (D6), login method Google | the dashboard and its API |
-| Broker Login — Dhan callback | `<subdomain>.beonedge.in/dhan` | **Bypass**, Include → Everyone | Dhan's servers redirect the browser here and cannot sign in. Without this a manual login hangs. The route validates every callback itself. |
-| Broker Login — token API | `<subdomain>.beonedge.in/api/v1` | **Service Auth**, Include → Service Token: one per trading engine (D4) | stops crawlers and scanners before they reach the TOTP gate. Each engine sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`. |
+| `broker-login` | `<subdomain>.beonedge.in`, whole host | **only me** (Allow, `beonedgellp@gmail.com`; A11) | Google only, *instant authentication* on, 24 h session |
+| `broker-login-dhan` | `<subdomain>.beonedge.in/dhan` | **dhan-bypass** (Bypass, Everyone) | none: Dhan's redirect cannot sign in, and the route validates every callback itself |
+| `broker-login-api` | `<subdomain>.beonedge.in/api/v1` | **broker-engines** (Service Auth, any service token for now; A12) | `CF-Access-Client-Id` + `CF-Access-Client-Secret` from the engine |
 
-If D4 is decided **without** service tokens, make the third application **Bypass** instead. Then the TOTP gate, the lockout and the per-IP limit are the only protection, so add the Cloudflare rate limit in step 5.
+Checked from outside: `/` and `/health` redirect to the Access login, `/dhan/callback` reaches nginx (502 until deployed), `/api/v1/token` without a valid service token gets 403 from Cloudflare.
 
-Create a service token in **Access → Service Auth → Create Service Token**, one per engine (e.g. `blackbox-centrum`). It is shown once; store it in that engine's `.env`. Revoke it there when an engine is retired. Set `CBL_API_REQUIRE_ACCESS_JWT=true` in this service's `.env`, so the app also refuses a request that somehow arrives without Access.
+**Per engine (phase 7):** Access controls → Service credentials → **Create service token** (e.g. `blackbox-trage`). Cloudflare shows the secret once; put it straight into that engine's `.env`, never here. Then change **broker-engines** from *Any Access Service Token* to that token, and revoke the token when the engine is retired. Set `CBL_API_REQUIRE_ACCESS_JWT=true` in this service's `.env`.
+
+**Monitoring note:** `/health` is behind Access too. An outside monitor needs its own service token, or a small Bypass app on `/health` (it reveals only `ok`/`unconfigured` and a count). The deploy's health gate uses loopback and is unaffected.
 
 ## Step 4: Dhan
 

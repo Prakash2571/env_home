@@ -16,6 +16,8 @@
 | A8 | The plan ([plan.md](plan.md)) is approved; D1–D9 stay open until the operator addresses them, and everything else is built. | 2026-10-22 | — |
 | A9 | Git commit bodies are the development log. | 2026-10-22 | in force |
 | A10 | (was D5) The subdomain is a **random 12-character name** under `beonedge.in`, so scanners and wordlists don't find it. Because this repository is public, **the name is never committed**: it lives only in the VPS `.env`, the tunnel config, the nginx site and Cloudflare DNS. Docs and files use `<subdomain>` or `__CBL_HOSTNAME__`. Obscurity only keeps crawlers away; Access and the TOTP gate remain the protection. | 2026-10-23 | `edge/` templates; see [deployment.md](manual/deployment.md) step 1 |
+| A11 | (was D6) Only `beonedgellp@gmail.com` may open the dashboard, signing in with Google: the account's existing reusable Access policy **only me**, the same one that guards the `gtsalgoresearch.online` console. `CBL_ADMIN_EMAILS` may repeat it as defence in depth. | 2026-10-23 | Access app `broker-login` (Google only, instant authentication, 24 h session) |
+| A12 | (was D4) The token API also requires a Cloudflare Access **service token**: policy **broker-engines** (Service Auth) on `/api/v1`. Until the first engine is connected it matches *any* service token; at phase 7 it names that engine's token. Set `CBL_API_REQUIRE_ACCESS_JWT=true` in the VPS `.env`. | 2026-10-23 | Access app `broker-login-api`; verified: without a token, or with a fake one, Cloudflare answers 403 |
 
 ## Open
 
@@ -26,8 +28,6 @@ Each row says what the code does **meanwhile**. Every open decision is a configu
 | D1 | Which brokers? | Dhan only for now | Dhan only (`src/dhan/`); another broker would be a sibling module behind the login engine |
 | D2 | How many accounts, and does each have its own Dhan API app? | — | any number, via `CBL_ACCOUNTS`; each needs its own key and secret with the shared redirect URL |
 | D3 | One API TOTP seed per account, or one shared? | per account | **both work**: `TOKEN_API_<ALIAS>_TOTP_SECRET` wins, else `TOKEN_API_TOTP_SECRET`; the dashboard shows which each account uses |
-| D4 | Require a Cloudflare Access service token on `/api/v1` as well as the TOTP? | yes | off: `CBL_API_REQUIRE_ACCESS_JWT=false`. Meanwhile it is client ID + TOTP + per-source lockout + per-IP limit. Turned on, the app requires the Access JWT header to be **present**; Cloudflare verifies the token, and the app verifies the signature only from phase 6 |
-| D6 | Which Google accounts may open the dashboard? | your own | Access policy decides; `CBL_ADMIN_EMAILS` empty means anyone Access admits |
 | D7 | Replace the legacy Next.js env store (Prakash's) on this branch? | yes, after a word with Prakash | **kept untouched** beside the new service; its CI job still runs; its README is in `docs/legacy/` |
 | D8 | Telegram: a new bot, or reuse `blackbox_trage`'s? | a new bot, same chat | any bot via `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`; without them, notices are skipped and shown as such |
 | D9 | Postgres: this stack's own container, or a database in the shared `boe-postgres`? | own container | own container in compose; `CBL_DATABASE_URL` points elsewhere if decided the other way |
