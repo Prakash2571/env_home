@@ -6,7 +6,7 @@ Read [README.md](README.md) first: it holds the rules, how to prepare context an
 
 - **Built** on `tamagami-hi/dev` (2026-10-22): the Rust service, the dashboard, the sidecar, the image, CI and `release_manager/`. See [docs/build-log.md](docs/build-log.md).
 - **Accounts are added on the dashboard** (A13), not in the `.env`. Access JWTs are verified (`src/access.rs`).
-- **Not deployed.** The first deploy waits on the operator: the VPS `.env` (the three `CBL_ACCESS_*` values), and the Cloudflare, Google and Dhan setup in [docs/manual/deployment.md](docs/manual/deployment.md).
+- **Deployed** 2026-10-23: `0.1.1-dev.33` runs on `beonedge` behind the random subdomain (on the VPS only, never in this repo). See the build log for what is still open.
 - **Open decisions** D1–D9 are in [docs/decisions.md](docs/decisions.md). Never decide one in code.
 - The operator often drives sessions from a phone. Use `release_manager/status.sh --do <op>` (never the interactive menu) and keep replies short.
 

@@ -2,6 +2,14 @@
 
 **What is built, what was verified, and what is open.** A new dated section after every change lands, newest first. The commit bodies carry the detail; this is the map.
 
+## 2026-10-23 (16:35 IST): first deploy, live
+
+**Deployed** `0.1.1-dev.33.ga6d2234ed` with `status.sh --do deploy --yes`. The first try (`0.1.1-dev.32`) stopped at step 8/13 before changing anything: the dump step misread a missing Postgres container as a broken one (`docker inspect … || echo missing` yields a newline plus "missing"). Fixed in `a6d2234`; the app code is the same.
+
+**Verified on the box:** `cbl-app`, `cbl-postgres` (healthy) and `cbl-login` up; migrations 1 and 2 applied; `/health` reports `ok` with no problems; 0 accounts loaded; the login window is the operator's 07:45-08:30. **Through Cloudflare:** `/` and `/health` go to the Access login; a real Google sign-in reached the dashboard, so the app verified the Access JWT against the live team certs; `/dhan/callback` reaches the app (410, nothing waiting); `/api/v1/token` without a service token gets 403 from Cloudflare; a LAN request faking `CF-Connecting-IP` gets 403 from nginx; `beonedge.in`, `app` and `beus` still answer 200.
+
+**Open:** Telegram answers "chat not found" (the bot cannot reach `TELEGRAM_CHAT_ID`: wrong ID, or the bot was never started in that chat or added to the group). Add the Dhan account on the Accounts page, store its token API seed, and run one manual login.
+
 ## 2026-10-23 (afternoon): the Accounts page and verified Access sign-ins
 
 Decided with the operator (A13): Dhan accounts live on the dashboard only, the Access signature check ships with them, and both come before the first deploy.
