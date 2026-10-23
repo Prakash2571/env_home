@@ -1,6 +1,6 @@
 use super::*;
 use crate::crypto::Cipher;
-use crate::state::{EventKind, LiveState, Phase};
+use crate::state::{EventKind, LiveState};
 use crate::store::{MemoryStore, Store, StoredToken};
 use crate::test_support::{KEY, account};
 
@@ -159,6 +159,24 @@ async fn a_row_sealed_under_another_key_is_skipped_and_reported() {
             .iter()
             .any(|event| event.kind == EventKind::Problem && event.message.contains("main"))
     );
+
+    assert!(
+        matches!(
+            book.add(&form("main", "1100000009"), None).await,
+            Err(AccountError::DuplicateAlias)
+        ),
+        "a skipped row is never overwritten by a new account"
+    );
+    assert!(matches!(
+        book.add(&form("alt", "1100000001"), None).await,
+        Err(AccountError::DuplicateClientId)
+    ));
+    let again = book_over(&store, OTHER_KEY);
+    assert_eq!(
+        again.load().await.unwrap(),
+        1,
+        "the row still opens with its own key"
+    );
 }
 
 #[tokio::test]
@@ -177,13 +195,16 @@ async fn removing_an_account_drops_its_secrets_and_tokens_but_not_while_it_logs_
         .await
         .unwrap();
 
-    book.live()
-        .update("main", |view| view.phase = Phase::LoggingIn);
+    let lease = book.registry().begin_login("main").unwrap();
     assert!(matches!(
         book.remove("main", None).await,
         Err(AccountError::Busy)
     ));
-    book.live().update("main", |view| view.phase = Phase::Ready);
+    assert!(
+        book.registry().get("main").is_some(),
+        "a refused removal changes nothing"
+    );
+    drop(lease);
 
     let removed = book.remove("main", Some("me@example.com")).await.unwrap();
     assert_eq!(removed.alias, "main");
@@ -256,4 +277,40 @@ fn debug_output_names_the_account_and_hides_every_secret() {
             "{secret} leaked: {printed}"
         );
     }
+}
+
+#[test]
+fn a_login_checks_out_the_current_account_and_holds_it_until_it_ends() {
+    let registry = Registry::default();
+    registry.replace_all(vec![account("main", "1100000001")]);
+    let (checked_out, lease) = registry.begin_login("main").unwrap();
+    assert_eq!(checked_out.alias, "main");
+    assert!(matches!(
+        registry.take_if_idle("main"),
+        Err(AccountError::Busy)
+    ));
+    drop(lease);
+    assert_eq!(registry.take_if_idle("main").unwrap().alias, "main");
+    assert!(
+        registry.begin_login("main").is_none(),
+        "a login queued behind a removal does not run"
+    );
+    assert!(matches!(
+        registry.take_if_idle("main"),
+        Err(AccountError::NotFound)
+    ));
+}
+
+#[test]
+fn the_seed_shown_once_never_appears_in_debug_output() {
+    let added = Added {
+        alias: "main".into(),
+        token_api_seed: "SEEDSEEDSEED".into(),
+        otpauth_uri: "otpauth://totp/x?secret=SEEDSEEDSEED".into(),
+    };
+    let printed = format!("{added:?}");
+    assert!(
+        printed.contains("main") && !printed.contains("SEEDSEEDSEED"),
+        "{printed}"
+    );
 }

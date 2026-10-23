@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
@@ -62,6 +62,46 @@ describe("App", () => {
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
     expect(screen.getByRole("form", { name: "add a Dhan account" })).toBeInTheDocument();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("keeps a seed shown once on screen while the operator looks at another tab", async () => {
+    const seed = "KRSXG5CTMVRXEZLUKN2XAZLSKNSWG4TF";
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) =>
+      String(input) === "/api/state"
+        ? respond(200, snapshot())
+        : respond(201, { alias: "alt", token_api_seed: seed, otpauth_uri: `otpauth://totp/BrokerLogin:alt?secret=${seed}` }),
+    );
+    window.history.replaceState(null, "", "/#accounts");
+    render(<App />);
+    const user = userEvent.setup();
+    const form = await screen.findByRole("form", { name: "add a Dhan account" });
+    for (const [label, value] of [
+      ["Alias", "alt"],
+      ["Client ID", "1100000002"],
+      ["API key", "k"],
+      ["API secret", "s"],
+      ["Dhan login ID", "8888888888"],
+      ["PIN", "654321"],
+      ["Dhan TOTP secret", "JBSWY3DPEHPK3PXP"],
+    ] as const) {
+      await user.type(within(form).getByLabelText(label), value);
+    }
+    await user.click(screen.getByRole("button", { name: "Add account" }));
+    expect(await screen.findByText(seed)).toBeInTheDocument();
+
+    const leaving = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(leaving);
+    expect(leaving.defaultPrevented, "closing the tab asks first").toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Logins" }));
+    await user.click(screen.getByRole("button", { name: "Accounts" }));
+    expect(screen.getByText(seed), "switching tabs does not lose it").toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "I have stored it" }));
+    const after = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
     window.history.replaceState(null, "", "/");
   });
 

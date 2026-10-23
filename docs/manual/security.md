@@ -31,6 +31,11 @@ What this service protects, who it protects it from, and where each control live
 - **The sidecar endpoint is unauthenticated** and reachable only over the compose network. Don't publish it.
 - **Replay state is in memory.** A restart forgets which code step was last accepted, so a code captured in the same 30 s step could be replayed once across a restart.
 - **The sidecar installs Playwright at first start** (`npm install playwright@1.63.0` into a volume) rather than from `sidecar/package-lock.json`, as in the reference. The version is pinned; the transitive tree is not.
+- **Who counts as an admin is the Access policy plus `CBL_ADMIN_EMAILS`.** With the allowlist empty, anyone the Access policy admits may add or remove accounts, so set it (A11). With `CBL_ADMIN_REQUIRE_ACCESS=false` (local development only) the account routes are open to anything that reaches the port.
+- **`CBL_API_REQUIRE_ACCESS_JWT` defaults to false.** A VPS `.env` that drops it falls back to client ID + TOTP + lockouts. The VPS template sets it (A12); the dashboard's token API label shows which mode is live.
+- **Secrets in memory are not zeroized.** The service holds every account's secrets in the clear for its lifetime and copies them per login. Anyone who can read the process memory can read them, as they could read the `.env` before.
+- **The copied seed stays on the clipboard** until something replaces it. Copy it straight into the engine's `.env`.
+- **Someone with write access to the database can roll a row back** to an older sealed copy (for example a previous token API seed): the seal binds the alias and client ID, not a version. They would already hold far more than this.
 - **A stolen token is valid until it expires.** Dhan offers no revocation here. Rotating the API seed stops future fetches only.
 
 ## Phase 6 checklist (after the code base is built)

@@ -130,15 +130,15 @@ async fn honours_the_account_contract(store: &Store, alias: &str, base: i64) {
             .filter(|row| row.alias.starts_with(alias))
             .collect()
     };
+    let second_client = format!("{base}2");
+    let first_client = format!("{base}1");
 
-    store
-        .save_account(&stored_account(&second, &format!("{base}2"), base))
-        .await
-        .unwrap();
-    store
-        .save_account(&stored_account(&first, &format!("{base}1"), base))
-        .await
-        .unwrap();
+    for row in [
+        stored_account(&second, &second_client, base),
+        stored_account(&first, &first_client, base),
+    ] {
+        assert_eq!(store.insert_account(&row).await.unwrap(), None);
+    }
     let rows = ours(store.list_accounts().await.unwrap());
     assert_eq!(
         rows.iter()
@@ -148,9 +148,41 @@ async fn honours_the_account_contract(store: &Store, alias: &str, base: i64) {
         "listed in the order they were added, not by name"
     );
 
-    let mut resealed = stored_account(&second, &format!("{base}2"), base + 60);
-    resealed.sealed = "v1.account.new".into();
-    store.save_account(&resealed).await.unwrap();
+    assert_eq!(
+        store
+            .insert_account(&stored_account(&second, "999", base))
+            .await
+            .unwrap(),
+        Some(AccountConflict::Alias),
+        "an insert never overwrites an existing row"
+    );
+    assert_eq!(
+        store
+            .insert_account(&stored_account(&format!("{alias}c"), &first_client, base))
+            .await
+            .unwrap(),
+        Some(AccountConflict::ClientId)
+    );
+    let rows = ours(store.list_accounts().await.unwrap());
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0].client_id, second_client,
+        "the refused insert changed nothing"
+    );
+
+    assert!(
+        store
+            .reseal_account(&second, &second_client, "v1.account.new", base + 60)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !store
+            .reseal_account(&second, "999", "v1.account.bad", base + 90)
+            .await
+            .unwrap(),
+        "a re-seal must match both the alias and the client ID"
+    );
     let rows = ours(store.list_accounts().await.unwrap());
     assert_eq!(rows[0].sealed, "v1.account.new");
     assert_eq!(
@@ -158,18 +190,6 @@ async fn honours_the_account_contract(store: &Store, alias: &str, base: i64) {
         "re-sealing keeps when it was added"
     );
     assert_eq!(rows[0].updated_at, base + 60);
-
-    assert!(
-        store
-            .save_account(&stored_account(
-                &format!("{alias}c"),
-                &format!("{base}1"),
-                base
-            ))
-            .await
-            .is_err(),
-        "two accounts may not share a client ID"
-    );
 
     store.save_token(&token(&second, base)).await.unwrap();
     assert!(store.delete_account(&second).await.unwrap());

@@ -188,11 +188,13 @@ export function App() {
                   </button>
                 ))}
               </nav>
-              {view === "accounts" ? (
+              {/* Kept mounted while hidden: it may be holding a seed that is shown only once. */}
+              <div hidden={view !== "accounts"}>
                 <AccountsPage accounts={snapshot.accounts} loaded={snapshot.accounts_loaded} now={now} />
-              ) : (
+              </div>
+              {view === "logins" ? (
                 <Logins snapshot={snapshot} now={now} busy={busy} onLogin={onLogin} onAdd={() => show("accounts")} />
-              )}
+              ) : null}
             </>
           )}
           <footer className="muted mono foot">version {snapshot.version}</footer>

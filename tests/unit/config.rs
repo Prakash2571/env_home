@@ -124,13 +124,25 @@ fn each_access_check_needs_the_team_and_its_own_aud_tag() {
             .any(|p| p.contains("CBL_ACCESS_API_AUD"))
     );
 
-    let mut env = complete();
-    env.insert(
-        "CBL_ACCESS_TEAM_DOMAIN".into(),
-        "http://team.cloudflareaccess.com".into(),
-    );
-    let found = problems(&env);
-    assert!(found.iter().any(|p| p.contains("https://")), "{found:?}");
+    for wrong in [
+        "http://team.cloudflareaccess.com",
+        "https://team.example.com",
+        "https://cloudflareaccess.com",
+        "https://team.cloudflareaccess.com/cdn-cgi",
+        "https://team.cloudflareaccess.com/?x=1",
+        "https://team.cloudflareaccess.com:8443",
+        "https://evil.com#.cloudflareaccess.com",
+    ] {
+        let mut env = complete();
+        env.insert("CBL_ACCESS_TEAM_DOMAIN".into(), wrong.into());
+        let found = problems(&env);
+        assert!(
+            found
+                .iter()
+                .any(|p| p.contains("<team>.cloudflareaccess.com")),
+            "{wrong} was accepted: {found:?}"
+        );
+    }
 }
 
 #[test]

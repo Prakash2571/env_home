@@ -143,10 +143,14 @@ impl LoginEngine {
     }
 
     pub async fn login(&self, alias: &str, drive: Drive) -> Result<Session, LoginFailure> {
-        let account = self
-            .account(alias)
-            .ok_or_else(|| fail(StageId::Consent, "no such account"))?;
         let _turn = self.turn.lock().await;
+        // Looked up only once this login's turn has come: one queued behind
+        // another must use the account as it is now, or not run if it is gone.
+        let (account, _lease) = self
+            .parts
+            .accounts
+            .begin_login(alias)
+            .ok_or_else(|| fail(StageId::Consent, "no such account"))?;
         let live = &self.parts.live;
         let started_at = now_unix();
         live.begin_attempt(alias);

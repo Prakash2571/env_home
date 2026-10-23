@@ -12,7 +12,7 @@ interface FieldSpec {
 const FIELDS: FieldSpec[] = [
   { name: "alias", label: "Alias", hint: "a short name: lower-case letters, digits or _", secret: false },
   { name: "client_id", label: "Client ID", hint: "the Dhan client ID trading engines ask for", secret: false },
-  { name: "api_key", label: "API key", hint: "from the account's DhanHQ API app", secret: false },
+  { name: "api_key", label: "API key", hint: "from the account's DhanHQ API app", secret: true },
   { name: "api_secret", label: "API secret", hint: "from the same API app", secret: true },
   { name: "account_id", label: "Dhan login ID", hint: "what Dhan's login page asks for", secret: false },
   { name: "pin", label: "PIN", hint: "the account's login PIN", secret: true },
@@ -85,7 +85,9 @@ export function AddAccountForm({ disabled, onAdded }: AddAccountFormProps) {
                 name={field.name}
                 type={field.secret ? "password" : "text"}
                 className="mono"
-                autoComplete="off"
+                autoComplete={field.secret ? "new-password" : "off"}
+                data-1p-ignore=""
+                data-lpignore="true"
                 spellCheck={false}
                 value={form[field.name]}
                 aria-invalid={problem === undefined ? undefined : true}

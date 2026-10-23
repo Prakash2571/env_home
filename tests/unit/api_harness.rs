@@ -100,6 +100,12 @@ pub async fn harness(api: ApiPolicy, admin: AdminPolicy, sidecar: Option<&str>) 
         sidecar,
         store.clone(),
     );
+    // As in production, the registry's accounts are rows in the store too.
+    let cipher = crate::crypto::Cipher::from_hex(crate::test_support::KEY).unwrap();
+    for account in engine.accounts() {
+        let row = crate::accounts::seal(&cipher, &account, 1_800_000_000).unwrap();
+        assert_eq!(store.insert_account(&row).await.unwrap(), None);
+    }
     let window = crate::clock::LoginWindow::parse("08:00-08:30", "mon-fri").unwrap();
     let (scheduler, handle) = Scheduler::new(
         Arc::clone(&engine),

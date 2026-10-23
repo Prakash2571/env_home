@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AddedAccount } from "../api/types";
 
 interface SeedRevealProps {
@@ -8,6 +8,12 @@ interface SeedRevealProps {
 
 export function SeedReveal({ added, onDone }: SeedRevealProps) {
   const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    // The seed cannot be shown again: closing or reloading the tab asks first.
+    const ask = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", ask);
+    return () => window.removeEventListener("beforeunload", ask);
+  }, []);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(added.token_api_seed);

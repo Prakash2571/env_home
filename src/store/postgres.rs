@@ -3,9 +3,15 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
+use tokio_postgres::error::SqlState;
 use tokio_postgres::{Client, NoTls, Row};
 
-use super::{AttemptRecord, MIGRATIONS, RequestRecord, StoredAccount, StoredToken};
+/// Postgres's name for the UNIQUE (client_id) constraint in migration 0002.
+const CLIENT_ID_CONSTRAINT: &str = "broker_accounts_client_id_key";
+
+use super::{
+    AccountConflict, AttemptRecord, MIGRATIONS, RequestRecord, StoredAccount, StoredToken,
+};
 
 #[derive(Clone)]
 pub struct PgStore {
@@ -120,14 +126,13 @@ impl PgStore {
             .collect())
     }
 
-    pub async fn save_account(&self, account: &StoredAccount) -> Result<()> {
-        self.client()
+    pub async fn insert_account(&self, account: &StoredAccount) -> Result<Option<AccountConflict>> {
+        let inserted = self
+            .client()
             .await?
             .execute(
                 "INSERT INTO broker_accounts (alias, client_id, sealed_secrets, created_at, updated_at) \
-                 VALUES ($1, $2, $3, $4, $5) \
-                 ON CONFLICT (alias) DO UPDATE SET sealed_secrets = EXCLUDED.sealed_secrets, \
-                 updated_at = EXCLUDED.updated_at",
+                 VALUES ($1, $2, $3, $4, $5)",
                 &[
                     &account.alias,
                     &account.client_id,
@@ -136,9 +141,40 @@ impl PgStore {
                     &moment(account.updated_at)?,
                 ],
             )
+            .await;
+        match inserted {
+            Ok(_) => Ok(None),
+            Err(error) => match error.as_db_error() {
+                Some(db) if *db.code() == SqlState::UNIQUE_VIOLATION => {
+                    Ok(Some(if db.constraint() == Some(CLIENT_ID_CONSTRAINT) {
+                        AccountConflict::ClientId
+                    } else {
+                        AccountConflict::Alias
+                    }))
+                }
+                _ => Err(anyhow::Error::new(error).context("could not store the account")),
+            },
+        }
+    }
+
+    pub async fn reseal_account(
+        &self,
+        alias: &str,
+        client_id: &str,
+        sealed: &str,
+        at: i64,
+    ) -> Result<bool> {
+        let updated = self
+            .client()
+            .await?
+            .execute(
+                "UPDATE broker_accounts SET sealed_secrets = $3, updated_at = $4 \
+                 WHERE alias = $1 AND client_id = $2",
+                &[&alias, &client_id, &sealed, &moment(at)?],
+            )
             .await
             .context("could not store the account")?;
-        Ok(())
+        Ok(updated == 1)
     }
 
     /// One statement, so the account and its tokens go together or not at all.

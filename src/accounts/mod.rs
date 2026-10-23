@@ -1,6 +1,7 @@
 mod form;
 mod sealed;
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -15,8 +16,8 @@ pub use sealed::{open, seal};
 use crate::clock::now_unix;
 use crate::crypto::Cipher;
 use crate::otp::{encode_base32, generate_seed, otpauth_uri};
-use crate::state::{EventKind, LiveState, Phase};
-use crate::store::Store;
+use crate::state::{EventKind, LiveState};
+use crate::store::{AccountConflict, Store};
 
 /// A Dhan account the service logs in. Added on the dashboard, kept sealed in
 /// the store, and held here in the clear only for the life of the process.
@@ -42,33 +43,53 @@ impl std::fmt::Debug for Account {
     }
 }
 
+#[derive(Default)]
+struct Accounts {
+    accounts: Vec<Account>,
+    logging_in: HashSet<String>,
+}
+
 /// The accounts in force right now, shared by the login engine, the scheduler
 /// and the token API, so a change on the dashboard applies without a restart.
 #[derive(Clone, Default)]
 pub struct Registry {
-    accounts: Arc<RwLock<Vec<Account>>>,
+    inner: Arc<RwLock<Accounts>>,
     loaded: Arc<AtomicBool>,
 }
 
+/// Held for the whole of one login. While it lives the account cannot be
+/// removed, and a login can only start for an account that is still here.
+pub struct LoginLease {
+    registry: Registry,
+    alias: String,
+}
+
+impl Drop for LoginLease {
+    fn drop(&mut self) {
+        self.registry.write().logging_in.remove(&self.alias);
+    }
+}
+
 impl Registry {
-    fn read(&self) -> RwLockReadGuard<'_, Vec<Account>> {
-        self.accounts
+    fn read(&self) -> RwLockReadGuard<'_, Accounts> {
+        self.inner
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn write(&self) -> RwLockWriteGuard<'_, Vec<Account>> {
-        self.accounts
+    fn write(&self) -> RwLockWriteGuard<'_, Accounts> {
+        self.inner
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub fn list(&self) -> Vec<Account> {
-        self.read().clone()
+        self.read().accounts.clone()
     }
 
     pub fn get(&self, alias: &str) -> Option<Account> {
         self.read()
+            .accounts
             .iter()
             .find(|account| account.alias == alias)
             .cloned()
@@ -79,14 +100,34 @@ impl Registry {
             return None;
         }
         self.read()
+            .accounts
             .iter()
             .find(|account| account.client_id == client_id)
             .cloned()
     }
 
+    /// The account as it is now, checked out for a login. None if it was
+    /// removed, which a login queued behind another must not outlive.
+    pub fn begin_login(&self, alias: &str) -> Option<(Account, LoginLease)> {
+        let mut inner = self.write();
+        let account = inner
+            .accounts
+            .iter()
+            .find(|account| account.alias == alias)
+            .cloned()?;
+        inner.logging_in.insert(alias.to_owned());
+        Some((
+            account,
+            LoginLease {
+                registry: self.clone(),
+                alias: alias.to_owned(),
+            },
+        ))
+    }
+
     /// Replaces the whole set and marks it loaded.
     pub fn replace_all(&self, accounts: Vec<Account>) {
-        *self.write() = accounts;
+        self.write().accounts = accounts;
         self.loaded.store(true, Ordering::SeqCst);
     }
 
@@ -95,12 +136,13 @@ impl Registry {
     }
 
     fn insert(&self, account: Account) {
-        self.write().push(account);
+        self.write().accounts.push(account);
     }
 
     fn replace(&self, account: Account) {
         if let Some(slot) = self
             .write()
+            .accounts
             .iter_mut()
             .find(|existing| existing.alias == account.alias)
         {
@@ -108,18 +150,38 @@ impl Registry {
         }
     }
 
-    fn remove(&self, alias: &str) {
-        self.write().retain(|account| account.alias != alias);
+    /// Takes the account out unless a login holds it, in one step, so no
+    /// login can start between the check and the removal.
+    fn take_if_idle(&self, alias: &str) -> Result<Account, AccountError> {
+        let mut inner = self.write();
+        let index = inner
+            .accounts
+            .iter()
+            .position(|account| account.alias == alias)
+            .ok_or(AccountError::NotFound)?;
+        if inner.logging_in.contains(alias) {
+            return Err(AccountError::Busy);
+        }
+        Ok(inner.accounts.remove(index))
     }
 }
 
 /// What the dashboard shows once, right after an account is added or its
 /// token API seed is replaced. The service never returns the seed again.
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct Added {
     pub alias: String,
     pub token_api_seed: String,
     pub otpauth_uri: String,
+}
+
+impl std::fmt::Debug for Added {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Added")
+            .field("alias", &self.alias)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug)]
@@ -219,7 +281,13 @@ impl AccountBook {
             dhan_totp_seed: new.dhan_totp_seed,
             api_totp_seed: generate_seed(),
         };
-        self.persist(&account).await?;
+        let row = seal(&self.cipher, &account, now_unix()).map_err(AccountError::Storage)?;
+        match self.store.insert_account(&row).await {
+            Ok(None) => {}
+            Ok(Some(AccountConflict::Alias)) => return Err(AccountError::DuplicateAlias),
+            Ok(Some(AccountConflict::ClientId)) => return Err(AccountError::DuplicateClientId),
+            Err(error) => return Err(AccountError::Storage(error)),
+        }
         self.registry.insert(account.clone());
         self.live.add_account(&account);
         self.live.note(
@@ -232,19 +300,14 @@ impl AccountBook {
 
     pub async fn remove(&self, alias: &str, who: Option<&str>) -> Result<Account, AccountError> {
         let _turn = self.turn.lock().await;
-        let account = self.loaded(alias)?;
-        let busy = self
-            .live
-            .account(alias)
-            .is_some_and(|view| matches!(view.phase, Phase::LoggingIn | Phase::AwaitingCallback));
-        if busy {
-            return Err(AccountError::Busy);
+        if !self.registry.is_loaded() {
+            return Err(AccountError::NotLoaded);
         }
-        self.store
-            .delete_account(alias)
-            .await
-            .map_err(AccountError::Storage)?;
-        self.registry.remove(alias);
+        let account = self.registry.take_if_idle(alias)?;
+        if let Err(error) = self.store.delete_account(alias).await {
+            self.registry.insert(account);
+            return Err(AccountError::Storage(error));
+        }
         self.live.remove_account(alias);
         self.live.note(
             EventKind::System,
@@ -264,7 +327,15 @@ impl AccountBook {
             api_totp_seed: generate_seed(),
             ..self.loaded(alias)?
         };
-        self.persist(&account).await?;
+        let row = seal(&self.cipher, &account, now_unix()).map_err(AccountError::Storage)?;
+        let resealed = self
+            .store
+            .reseal_account(&row.alias, &row.client_id, &row.sealed, row.updated_at)
+            .await
+            .map_err(AccountError::Storage)?;
+        if !resealed {
+            return Err(AccountError::NotFound);
+        }
         self.registry.replace(account.clone());
         self.live.note(
             EventKind::System,
@@ -282,14 +353,6 @@ impl AccountBook {
             return Err(AccountError::NotLoaded);
         }
         self.registry.get(alias).ok_or(AccountError::NotFound)
-    }
-
-    async fn persist(&self, account: &Account) -> Result<(), AccountError> {
-        let row = seal(&self.cipher, account, now_unix()).map_err(AccountError::Storage)?;
-        self.store
-            .save_account(&row)
-            .await
-            .map_err(AccountError::Storage)
     }
 }
 

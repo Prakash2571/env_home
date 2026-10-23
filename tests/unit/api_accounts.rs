@@ -5,7 +5,6 @@ use serde_json::{Value, json};
 use crate::access::JWT_HEADER;
 use crate::api_harness::*;
 use crate::otp::{code_at, decode_base32, now_seconds};
-use crate::state::Phase;
 
 fn send(harness: &Harness, method: &str, path: &str, body: Value) -> Request<Body> {
     Request::builder()
@@ -183,10 +182,7 @@ async fn removing_needs_the_alias_typed_waits_for_a_login_and_stops_the_api_at_o
         "the alias must be typed exactly"
     );
 
-    harness
-        .engine
-        .live()
-        .update("main", |view| view.phase = Phase::LoggingIn);
+    let lease = harness.engine.registry().begin_login("main").unwrap();
     let (status, _, _) = call(
         router,
         send(
@@ -198,10 +194,7 @@ async fn removing_needs_the_alias_typed_waits_for_a_login_and_stops_the_api_at_o
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "not while it logs in");
-    harness
-        .engine
-        .live()
-        .update("main", |view| view.phase = Phase::Ready);
+    drop(lease);
 
     let (status, _, body) = call(
         router,

@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::Result;
 
-use super::{AttemptRecord, RequestRecord, StoredAccount, StoredToken};
+use super::{AccountConflict, AttemptRecord, RequestRecord, StoredAccount, StoredToken};
 
 const MAX_ROWS: usize = 5_000;
 
@@ -57,26 +57,34 @@ impl MemoryStore {
         self.tables().accounts.clone()
     }
 
-    pub fn save_account(&self, account: &StoredAccount) -> Result<()> {
+    pub fn insert_account(&self, account: &StoredAccount) -> Option<AccountConflict> {
         let mut tables = self.tables();
-        if let Some(existing) = tables
-            .accounts
-            .iter_mut()
-            .find(|existing| existing.alias == account.alias)
-        {
-            existing.sealed = account.sealed.clone();
-            existing.updated_at = account.updated_at;
-            return Ok(());
+        if tables.accounts.iter().any(|row| row.alias == account.alias) {
+            return Some(AccountConflict::Alias);
         }
         if tables
             .accounts
             .iter()
-            .any(|existing| existing.client_id == account.client_id)
+            .any(|row| row.client_id == account.client_id)
         {
-            anyhow::bail!("another account already uses that client ID");
+            return Some(AccountConflict::ClientId);
         }
         tables.accounts.push(account.clone());
-        Ok(())
+        None
+    }
+
+    pub fn reseal_account(&self, alias: &str, client_id: &str, sealed: &str, at: i64) -> bool {
+        let mut tables = self.tables();
+        let Some(row) = tables
+            .accounts
+            .iter_mut()
+            .find(|row| row.alias == alias && row.client_id == client_id)
+        else {
+            return false;
+        };
+        sealed.clone_into(&mut row.sealed);
+        row.updated_at = at;
+        true
     }
 
     pub fn delete_account(&self, alias: &str) -> bool {

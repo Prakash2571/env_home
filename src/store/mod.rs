@@ -35,6 +35,13 @@ pub struct StoredAccount {
     pub updated_at: i64,
 }
 
+/// Why an insert was refused: the row already there is left exactly as it was.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AccountConflict {
+    Alias,
+    ClientId,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AttemptRecord {
     pub alias: String,
@@ -85,11 +92,27 @@ impl Store {
         }
     }
 
-    /// Inserts the account, or replaces its sealed secrets keeping `created_at`.
-    pub async fn save_account(&self, account: &StoredAccount) -> Result<()> {
+    /// Adds a new account. Never overwrites: a taken alias or client ID comes
+    /// back as a conflict, even for a row the service could not open.
+    pub async fn insert_account(&self, account: &StoredAccount) -> Result<Option<AccountConflict>> {
         match self {
-            Self::Memory(store) => store.save_account(account),
-            Self::Postgres(store) => store.save_account(account).await,
+            Self::Memory(store) => Ok(store.insert_account(account)),
+            Self::Postgres(store) => store.insert_account(account).await,
+        }
+    }
+
+    /// Replaces an account's sealed secrets, only where both the alias and the
+    /// client ID match, keeping `created_at`. False when no such row exists.
+    pub async fn reseal_account(
+        &self,
+        alias: &str,
+        client_id: &str,
+        sealed: &str,
+        at: i64,
+    ) -> Result<bool> {
+        match self {
+            Self::Memory(store) => Ok(store.reseal_account(alias, client_id, sealed, at)),
+            Self::Postgres(store) => store.reseal_account(alias, client_id, sealed, at).await,
         }
     }
 

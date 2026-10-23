@@ -94,9 +94,23 @@ pub struct Basics {
     pub access: Option<AccessVerifier>,
 }
 
+const ACCESS_TEAM_SUFFIX: &str = ".cloudflareaccess.com";
+
+/// The team's Access origin and nothing else: it is the trust anchor for
+/// every sign-in, so a path, a query or another host is a configuration error.
 fn team_domain(read: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     text(read, "CBL_ACCESS_TEAM_DOMAIN").filter(|value| {
-        Url::parse(value).is_ok_and(|url| url.scheme() == "https" && url.host_str().is_some())
+        Url::parse(value).is_ok_and(|url| {
+            url.scheme() == "https"
+                && url.host_str().is_some_and(|host| {
+                    host.ends_with(ACCESS_TEAM_SUFFIX) && host.len() > ACCESS_TEAM_SUFFIX.len()
+                })
+                && url.port().is_none()
+                && matches!(url.path(), "" | "/")
+                && url.query().is_none()
+                && url.fragment().is_none()
+                && url.username().is_empty()
+        })
     })
 }
 
@@ -260,7 +274,7 @@ pub fn load(read: &dyn Fn(&str) -> Option<String>) -> Result<Config, ConfigGap> 
 fn check_access(reader: &mut Reader<'_>, admin: &AdminPolicy, api: &ApiPolicy) {
     if text(reader.read, "CBL_ACCESS_TEAM_DOMAIN").is_some() && team_domain(reader.read).is_none() {
         reader.problems.push(
-            "CBL_ACCESS_TEAM_DOMAIN must be the team's https:// Access domain, e.g. https://<team>.cloudflareaccess.com"
+            "CBL_ACCESS_TEAM_DOMAIN must be https://<team>.cloudflareaccess.com, with no path or query"
                 .into(),
         );
     }

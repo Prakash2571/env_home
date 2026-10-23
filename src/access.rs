@@ -11,13 +11,15 @@ use anyhow::{Context as _, Result};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Deserialize;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 pub const JWT_HEADER: &str = "cf-access-jwt-assertion";
 /// Clock skew allowed between Cloudflare and this box.
 pub const LEEWAY_SECONDS: i64 = 60;
 /// Cloudflare rotates its signing keys every six weeks; an hour is plenty fresh.
 const KEYS_MAX_AGE: Duration = Duration::from_secs(3600);
+/// If the certs cannot be refreshed, keys older than this stop being trusted.
+const KEYS_MAX_STALE: Duration = Duration::from_secs(24 * 3600);
 /// An unknown key id refetches the certs, but never more often than this.
 const REFETCH_GAP: Duration = Duration::from_secs(30);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -74,6 +76,9 @@ struct Inner {
     certs_url: String,
     http: reqwest::Client,
     keys: RwLock<Keys>,
+    /// One fetch at a time, held apart from `keys`: a slow fetch never stalls
+    /// a request whose key is already cached.
+    fetching: Mutex<()>,
 }
 
 /// One per team domain, shared by the dashboard and the token API checks.
@@ -158,6 +163,7 @@ impl AccessVerifier {
                 issuer,
                 http,
                 keys: RwLock::new(Keys::default()),
+                fetching: Mutex::new(()),
             }),
         })
     }
@@ -224,36 +230,48 @@ impl AccessVerifier {
         })
     }
 
-    async fn key(&self, kid: &str) -> Result<RsaKey, AccessError> {
-        {
-            let keys = self.inner.keys.read().await;
-            let fresh = keys
-                .fetched_at
-                .is_some_and(|at| at.elapsed() < KEYS_MAX_AGE);
-            if let Some(key) = keys.by_kid.get(kid).filter(|_| fresh) {
-                return Ok(key.clone());
-            }
-        }
-        let mut keys = self.inner.keys.write().await;
-        let may_fetch = keys.tried_at.is_none_or(|at| at.elapsed() >= REFETCH_GAP);
-        let stale = keys
+    async fn cached(&self, kid: &str) -> Option<RsaKey> {
+        let keys = self.inner.keys.read().await;
+        let fresh = keys
             .fetched_at
-            .is_none_or(|at| at.elapsed() >= KEYS_MAX_AGE);
-        if may_fetch && (stale || !keys.by_kid.contains_key(kid)) {
-            keys.tried_at = Some(Instant::now());
+            .is_some_and(|at| at.elapsed() < KEYS_MAX_AGE);
+        keys.by_kid.get(kid).filter(|_| fresh).cloned()
+    }
+
+    async fn key(&self, kid: &str) -> Result<RsaKey, AccessError> {
+        if let Some(key) = self.cached(kid).await {
+            return Ok(key);
+        }
+        let _fetching = self.inner.fetching.lock().await;
+        if let Some(key) = self.cached(kid).await {
+            return Ok(key);
+        }
+        let may_fetch = {
+            let mut keys = self.inner.keys.write().await;
+            let may = keys.tried_at.is_none_or(|at| at.elapsed() >= REFETCH_GAP);
+            if may {
+                keys.tried_at = Some(Instant::now());
+            }
+            may
+        };
+        if may_fetch {
             match self.fetch().await {
                 Ok(fetched) => {
+                    let mut keys = self.inner.keys.write().await;
                     keys.by_kid = fetched;
-                    keys.fetched_at = keys.tried_at;
+                    keys.fetched_at = Some(Instant::now());
                 }
                 Err(error) => tracing::warn!(%error, "could not fetch the Cloudflare Access certs"),
             }
         }
-        match keys.by_kid.get(kid) {
-            Some(key) => Ok(key.clone()),
-            None if keys.fetched_at.is_none() => Err(AccessError::KeysUnavailable),
-            None => Err(AccessError::UnknownKey),
+        let keys = self.inner.keys.read().await;
+        if keys
+            .fetched_at
+            .is_none_or(|at| at.elapsed() >= KEYS_MAX_STALE)
+        {
+            return Err(AccessError::KeysUnavailable);
         }
+        keys.by_kid.get(kid).cloned().ok_or(AccessError::UnknownKey)
     }
 
     async fn fetch(&self) -> Result<HashMap<String, RsaKey>> {
