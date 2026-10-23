@@ -108,6 +108,16 @@ cbl_assert_safe_dir() {
 
 docker_bin() { printf '%s\n' "${P[docker]:-docker}"; }
 
+# cbl_inspect <container> <format> — one field, or nothing and status 1 when
+# the container does not exist. Not "inspect || echo missing": for a missing
+# container docker prints an empty line before failing, which gives a value
+# of newline + "missing" that matched nothing (the first deploy refused on it).
+cbl_inspect() {
+    local out
+    out="$("$(docker_bin)" inspect -f "$2" "$1" 2>/dev/null)" || return 1
+    printf '%s' "$out"
+}
+
 cbl_image_tag() { printf '%s-%s:%s\n' "${P[image_prefix]}" "$1" "$2"; }
 
 # compose <args...> — docker compose, always with this stack's project and file.
@@ -342,7 +352,7 @@ cbl_rollback_verify() {
 cbl_dump_database() {
     local label="$1" dest state
     [[ "${P[db_enabled]}" == true ]] || return 0
-    state="$("$(docker_bin)" inspect -f '{{.State.Status}}' "${P[db_container]}" 2>/dev/null || echo missing)"
+    state="$(cbl_inspect "${P[db_container]}" '{{.State.Status}}')" || state=missing
     if [[ "$state" == missing ]]; then
         info "no ${P[db_container]} yet — first deploy, nothing to dump"
         return 0
@@ -387,7 +397,7 @@ cbl_health_container() {
 
     info "letting the app settle for ${settle}s"
     while (( waited < settle )); do
-        state="$("$(docker_bin)" inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
+        state="$(cbl_inspect "$name" '{{.State.Status}}')" || state=missing
         case "$state" in
             running|missing) : ;;
             *) warn "container $name is $state"; return 1 ;;
@@ -396,10 +406,10 @@ cbl_health_container() {
         waited=$(( waited + 1 ))
     done
 
-    state="$("$(docker_bin)" inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
+    state="$(cbl_inspect "$name" '{{.State.Status}}')" || state=missing
     [[ "$state" == running ]] || { warn "container $name is $state after ${settle}s"; return 1; }
 
-    restarts="$("$(docker_bin)" inspect -f '{{.RestartCount}}' "$name" 2>/dev/null || echo 0)"
+    restarts="$(cbl_inspect "$name" '{{.RestartCount}}')" || restarts=0
     (( restarts == 0 )) || { warn "container restarted $restarts time(s) during settle"; return 1; }
     ok "container running, no restarts in ${settle}s"
 

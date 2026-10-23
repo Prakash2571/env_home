@@ -178,7 +178,8 @@ export_accept_image() {
     docker run -d --name "$name" "$tag" >/dev/null 2>&1 || { err "image would not start at all"; exit 1; }
     sleep 6
     out="$(docker logs "$name" 2>&1 || true)"
-    state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)"
+    # Not "|| echo missing": docker prints an empty line for a missing container.
+    state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null)" || state=missing
     docker rm -f "$name" >/dev/null 2>&1 || true
 
     grep -qF "$(stack_attr "$stack" accept_log)" <<<"$out" || {
