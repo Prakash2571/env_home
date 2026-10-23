@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use super::{Drive, LoginEngine};
+use super::{AUTOMATED_TRIES, Drive, LoginEngine, Try};
 use crate::clock::{LoginWindow, describe, ist_day_number};
 use crate::state::EventKind;
 use crate::telegram::{Notice, Topic};
@@ -48,6 +48,8 @@ pub struct Scheduler {
     now: Now,
     retry_gap: Duration,
     ledger: DayLedger,
+    /// Accounts with an automated run of retries in progress.
+    retrying: Arc<Mutex<HashSet<String>>>,
 }
 
 impl Scheduler {
@@ -60,8 +62,16 @@ impl Scheduler {
             now,
             retry_gap: RETRY_GAP,
             ledger: DayLedger::default(),
+            retrying: Arc::default(),
         };
         (scheduler, SchedulerHandle { sender })
+    }
+
+    /// The pause between tries; long enough for a fresh TOTP step.
+    #[must_use]
+    pub fn with_retry_gap(mut self, gap: Duration) -> Self {
+        self.retry_gap = gap;
+        self
     }
 
     pub fn window(&self) -> &LoginWindow {
@@ -126,8 +136,16 @@ impl Scheduler {
                 return Duration::from_secs(self.window.seconds_left(now).max(1) as u64);
             }
             for alias in due {
-                *self.ledger.attempts.entry(alias.clone()).or_default() += 1;
-                if let Err(failure) = self.engine.login(&alias, Drive::Scheduled).await
+                let spent = self.ledger.attempts.entry(alias.clone()).or_default();
+                *spent += 1;
+                let attempt = Try {
+                    number: *spent,
+                    of: MAX_WINDOW_ATTEMPTS,
+                };
+                if let Err(failure) = self
+                    .engine
+                    .login_try(&alias, Drive::Scheduled, attempt)
+                    .await
                     && failure.hopeless
                 {
                     self.ledger.stopped.insert(alias);
@@ -221,10 +239,54 @@ impl Scheduler {
                 .collect(),
         };
         let engine = Arc::clone(&self.engine);
+        let retrying = Arc::clone(&self.retrying);
+        let gap = self.retry_gap;
         tokio::spawn(async move {
             for alias in aliases {
-                let _ = engine.login(&alias, request.drive).await;
+                if request.drive == Drive::Automated {
+                    retry_automated(&engine, &retrying, &alias, gap).await;
+                } else {
+                    let _ = engine.login(&alias, request.drive).await;
+                }
             }
         });
     }
+}
+
+/// An automated login from the dashboard: up to AUTOMATED_TRIES tries, a gap
+/// apart, stopping at the first success or a failure that cannot pass. The
+/// engine reports only the last failure, asking for a manual login.
+async fn retry_automated(
+    engine: &LoginEngine,
+    retrying: &Mutex<HashSet<String>>,
+    alias: &str,
+    gap: Duration,
+) {
+    let claimed = retrying
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(alias.to_owned());
+    if !claimed {
+        engine.live().note(
+            EventKind::Login,
+            Some(alias),
+            format!("an automated login of {alias} is already retrying; this request is ignored"),
+        );
+        return;
+    }
+    for number in 1..=AUTOMATED_TRIES {
+        let attempt = Try {
+            number,
+            of: AUTOMATED_TRIES,
+        };
+        match engine.login_try(alias, Drive::Automated, attempt).await {
+            Ok(_) => break,
+            Err(failure) if failure.hopeless || attempt.is_last() => break,
+            Err(_) => tokio::time::sleep(gap).await,
+        }
+    }
+    retrying
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(alias);
 }

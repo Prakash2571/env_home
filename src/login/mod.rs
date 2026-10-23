@@ -21,6 +21,8 @@ use crate::telegram::{Notice, Notifier, Topic};
 use crate::vault::{Vault, token_view};
 
 pub const CONSENTS_PER_DAY: u32 = 25;
+/// How many times an automated login is tried before a person is asked.
+pub const AUTOMATED_TRIES: u32 = 5;
 pub const MANUAL_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -38,6 +40,22 @@ impl Drive {
             Self::Automated => "automated",
             Self::Manual => "manual",
         }
+    }
+}
+
+/// Which try this is. Only the last one (or one that cannot pass) is
+/// reported to Telegram, so a run of retries sends one notice, not five.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Try {
+    pub number: u32,
+    pub of: u32,
+}
+
+impl Try {
+    pub const ONCE: Self = Self { number: 1, of: 1 };
+
+    pub const fn is_last(self) -> bool {
+        self.number >= self.of
     }
 }
 
@@ -143,14 +161,23 @@ impl LoginEngine {
     }
 
     pub async fn login(&self, alias: &str, drive: Drive) -> Result<Session, LoginFailure> {
+        self.login_try(alias, drive, Try::ONCE).await
+    }
+
+    pub async fn login_try(
+        &self,
+        alias: &str,
+        drive: Drive,
+        attempt: Try,
+    ) -> Result<Session, LoginFailure> {
         let _turn = self.turn.lock().await;
         // Looked up only once this login's turn has come: one queued behind
         // another must use the account as it is now, or not run if it is gone.
-        let (account, _lease) = self
-            .parts
-            .accounts
-            .begin_login(alias)
-            .ok_or_else(|| fail(StageId::Consent, "no such account"))?;
+        let (account, _lease) = self.parts.accounts.begin_login(alias).ok_or(LoginFailure {
+            stage: StageId::Consent,
+            detail: "no such account".into(),
+            hopeless: true,
+        })?;
         let live = &self.parts.live;
         let started_at = now_unix();
         live.begin_attempt(alias);
@@ -183,7 +210,8 @@ impl LoginEngine {
             Err(failure) => {
                 self.save_attempt(record("failed", failure.stage, failure.detail.clone()))
                     .await;
-                self.announce_failure(&account, drive, failure);
+                self.announce_failure(&account, drive, failure, attempt)
+                    .await;
             }
         }
         outcome
@@ -464,14 +492,16 @@ impl LoginEngine {
         live.update(&account.alias, |view| view.phase = Phase::Ready);
     }
 
-    fn announce_failure(&self, account: &Account, drive: Drive, failure: &LoginFailure) {
+    async fn announce_failure(
+        &self,
+        account: &Account,
+        drive: Drive,
+        failure: &LoginFailure,
+        attempt: Try,
+    ) {
         let live = &self.parts.live;
-        live.note(
-            EventKind::Problem,
-            Some(&account.alias),
-            format!("login failed at {failure}"),
-        );
-        live.update(&account.alias, |view| {
+        let alias = account.alias.as_str();
+        live.update(alias, |view| {
             view.last_error = Some(failure.to_string());
             view.phase = if failure.hopeless {
                 Phase::StoppedForToday
@@ -479,15 +509,62 @@ impl LoginEngine {
                 Phase::Failed
             };
         });
-        let next = if failure.hopeless {
-            "another automatic try today cannot pass; open the consent link on the dashboard"
+        let retried = attempt.of > 1;
+        if retried && !attempt.is_last() && !failure.hopeless {
+            live.note(
+                EventKind::Problem,
+                Some(alias),
+                format!(
+                    "attempt {} of {} failed at {failure}; retrying",
+                    attempt.number, attempt.of
+                ),
+            );
+            return;
+        }
+        live.note(
+            EventKind::Problem,
+            Some(alias),
+            format!("login failed at {failure}"),
+        );
+
+        let consents_left = self
+            .parts
+            .vault
+            .store()
+            .consents_since(alias, ist_midnight(now_unix()))
+            .await
+            .map(|used| CONSENTS_PER_DAY.saturating_sub(used).to_string())
+            .unwrap_or_else(|_| "unknown".into());
+        let (headline, next) = if failure.hopeless {
+            (
+                format!("{alias} did not log in"),
+                "another automatic try today cannot pass; log in manually from the dashboard",
+            )
+        } else if retried {
+            live.note(
+                EventKind::Problem,
+                Some(alias),
+                format!(
+                    "{alias} did not log in after {} tries; log in manually from the dashboard",
+                    attempt.of
+                ),
+            );
+            (
+                format!("{alias} did not log in after {} tries", attempt.of),
+                "log in manually: Manual login on the dashboard, then check the account's Dhan TOTP secret if the code was refused",
+            )
         } else {
-            "the scheduler retries inside the window; the dashboard can retry now"
+            (
+                format!("{alias} did not log in"),
+                "the dashboard can retry now",
+            )
         };
         self.parts.notifier.send(
-            &Notice::problem(Topic::Login, format!("{} did not log in", account.alias))
+            &Notice::problem(Topic::Login, headline)
                 .fact("path", drive.label())
                 .fact("stage", failure.stage.label())
+                .fact("tries", format!("{} of {}", attempt.number, attempt.of))
+                .fact("consents left today", consents_left)
                 .error(&failure.detail)
                 .next(next),
         );

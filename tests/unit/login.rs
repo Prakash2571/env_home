@@ -17,6 +17,8 @@ struct Fakes {
     consent: (StatusCode, Value),
     exchange_client: String,
     sidecar: Option<Value>,
+    /// The sidecar answers "Invalid Totp" this many times before `sidecar`.
+    totp_rejections_first: usize,
 }
 
 impl Default for Fakes {
@@ -28,6 +30,7 @@ impl Default for Fakes {
             ),
             exchange_client: "1100000001".into(),
             sidecar: Some(json!({"ok": true, "tokenId": "tid-1"})),
+            totp_rejections_first: 0,
         }
     }
 }
@@ -55,15 +58,28 @@ async fn harness(fakes: Fakes, manual_timeout: Duration) -> (Arc<LoginEngine>, S
     .await;
     let sidecar = match fakes.sidecar {
         Some(reply) => {
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let rejections = fakes.totp_rejections_first;
             let url = serve(Router::new().route(
                 "/login",
                 post(move || {
                     let reply = reply.clone();
-                    async move { axum::Json(reply) }
+                    let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    async move {
+                        if call < rejections {
+                            axum::Json(json!({"ok": false, "stage": "totp-rejected", "error": "Dhan said: Invalid Totp entered, try again"}))
+                        } else {
+                            axum::Json(reply)
+                        }
+                    }
                 }),
             ))
             .await;
-            Some(Sidecar::with_code_lifetime(&format!("{url}/login"), 0).unwrap())
+            Some(
+                Sidecar::with_code_lifetime(&format!("{url}/login"), 0)
+                    .unwrap()
+                    .reusing_steps(),
+            )
         }
         None => None,
     };
@@ -390,5 +406,150 @@ async fn a_restart_after_the_window_stays_quiet_when_every_account_is_ready() {
             .iter()
             .any(|event| event.message.contains("morning summary")),
         "a deploy after the window must not repeat 'everyone logged in'"
+    );
+}
+
+const QUICK: Duration = Duration::from_millis(20);
+
+async fn attempts_settle(store: &Store, want: usize) -> Vec<crate::store::AttemptRecord> {
+    for _ in 0..300 {
+        let attempts = store.recent_attempts(50).await.unwrap();
+        if attempts.len() >= want {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            return store.recent_attempts(50).await.unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    store.recent_attempts(50).await.unwrap()
+}
+
+fn automated_scheduler(engine: &Arc<LoginEngine>) -> SchedulerHandle {
+    let window = LoginWindow::parse("08:00-08:30", "sat").unwrap();
+    let (scheduler, handle) = Scheduler::new(Arc::clone(engine), window, fixed(MONDAY_0810_IST));
+    tokio::spawn(scheduler.with_retry_gap(QUICK).run());
+    handle
+}
+
+fn automated(alias: &str) -> LoginRequest {
+    LoginRequest {
+        alias: Some(alias.into()),
+        drive: Drive::Automated,
+    }
+}
+
+fn events_with(engine: &LoginEngine, text: &str) -> usize {
+    engine
+        .live()
+        .events()
+        .iter()
+        .filter(|event| event.message.contains(text))
+        .count()
+}
+
+#[tokio::test]
+async fn an_automated_login_from_the_dashboard_retries_until_it_logs_in() {
+    let fakes = Fakes {
+        totp_rejections_first: 2,
+        ..Fakes::default()
+    };
+    let (engine, store) = harness(fakes, MANUAL_TIMEOUT).await;
+    assert!(automated_scheduler(&engine).request(automated("main")));
+
+    let attempts = attempts_settle(&store, 3).await;
+    let outcomes: Vec<&str> = attempts.iter().rev().map(|a| a.outcome.as_str()).collect();
+    assert_eq!(
+        outcomes,
+        ["failed", "failed", "ok"],
+        "two rejections, then in"
+    );
+    assert_eq!(events_with(&engine, "attempt 1 of 5 failed"), 1);
+    assert_eq!(events_with(&engine, "attempt 2 of 5 failed"), 1);
+    assert_eq!(events_with(&engine, "log in manually"), 0);
+    assert_eq!(engine.live().account("main").unwrap().phase, Phase::Ready);
+}
+
+#[tokio::test]
+async fn after_five_failed_tries_it_stops_and_asks_for_a_manual_login() {
+    let fakes = Fakes {
+        totp_rejections_first: usize::MAX,
+        ..Fakes::default()
+    };
+    let (engine, store) = harness(fakes, MANUAL_TIMEOUT).await;
+    assert!(automated_scheduler(&engine).request(automated("main")));
+
+    let attempts = attempts_settle(&store, 5).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        store.recent_attempts(50).await.unwrap().len(),
+        5,
+        "never a sixth"
+    );
+    assert!(attempts.iter().all(|attempt| attempt.outcome == "failed"));
+    assert_eq!(
+        events_with(&engine, "did not log in after 5 tries; log in manually"),
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_failure_that_cannot_pass_stops_the_retries_at_once() {
+    let fakes = Fakes {
+        sidecar: Some(json!({"ok": false, "stage": "otp", "error": "Dhan asked for an SMS OTP"})),
+        ..Fakes::default()
+    };
+    let (engine, store) = harness(fakes, MANUAL_TIMEOUT).await;
+    let handle = automated_scheduler(&engine);
+    assert!(handle.request(automated("main")));
+    attempts_settle(&store, 1).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(store.recent_attempts(50).await.unwrap().len(), 1);
+
+    assert!(handle.request(automated("nobody")));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        events_with(&engine, "retrying"),
+        0,
+        "an account that is not there is not retried"
+    );
+}
+
+#[tokio::test]
+async fn a_second_request_while_one_is_retrying_does_not_double_the_tries() {
+    let fakes = Fakes {
+        totp_rejections_first: usize::MAX,
+        ..Fakes::default()
+    };
+    let (engine, store) = harness(fakes, MANUAL_TIMEOUT).await;
+    let window = LoginWindow::parse("08:00-08:30", "sat").unwrap();
+    let (scheduler, handle) = Scheduler::new(Arc::clone(&engine), window, fixed(MONDAY_0810_IST));
+    tokio::spawn(scheduler.with_retry_gap(Duration::from_millis(60)).run());
+    assert!(handle.request(automated("main")));
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(handle.request(automated("main")));
+
+    attempts_settle(&store, 5).await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(store.recent_attempts(50).await.unwrap().len(), 5);
+    assert_eq!(events_with(&engine, "already retrying"), 1);
+}
+
+#[tokio::test]
+async fn the_morning_window_asks_for_a_manual_login_after_its_fifth_failure() {
+    let fakes = Fakes {
+        totp_rejections_first: usize::MAX,
+        ..Fakes::default()
+    };
+    let (engine, store) = harness(fakes, MANUAL_TIMEOUT).await;
+    let window = LoginWindow::parse("08:00-08:30", "mon-fri").unwrap();
+    let (mut scheduler, _handle) =
+        Scheduler::new(Arc::clone(&engine), window, fixed(MONDAY_0810_IST));
+    for _ in 0..7 {
+        scheduler.tick().await;
+    }
+    assert_eq!(store.recent_attempts(50).await.unwrap().len(), 5);
+    assert_eq!(events_with(&engine, "attempt 4 of 5 failed"), 1);
+    assert_eq!(
+        events_with(&engine, "did not log in after 5 tries; log in manually"),
+        1
     );
 }

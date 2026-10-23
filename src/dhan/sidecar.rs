@@ -99,6 +99,9 @@ pub struct Sidecar {
     client: Client,
     last_step: Arc<AtomicU64>,
     min_code_lifetime: u64,
+    /// Tests only: lets back-to-back tries share a TOTP step instead of
+    /// waiting up to 30 s for the next one. Dhan refuses a reused code.
+    reuse_steps: bool,
 }
 
 impl Sidecar {
@@ -116,12 +119,21 @@ impl Sidecar {
             client,
             last_step: Arc::new(AtomicU64::new(NO_STEP)),
             min_code_lifetime,
+            reuse_steps: false,
         })
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub fn reusing_steps(mut self) -> Self {
+        self.reuse_steps = true;
+        self
     }
 
     async fn fresh_code(&self, account: &Account) -> String {
         loop {
-            let last = Some(self.last_step.load(Ordering::Relaxed)).filter(|step| *step != NO_STEP);
+            let last = Some(self.last_step.load(Ordering::Relaxed))
+                .filter(|step| *step != NO_STEP && !self.reuse_steps);
             let wait = wait_for_fresh_code(last, now_seconds(), self.min_code_lifetime);
             if wait == 0 {
                 break;

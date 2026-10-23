@@ -2,6 +2,12 @@
 
 **What is built, what was verified, and what is open.** A new dated section after every change lands, newest first. The commit bodies carry the detail; this is the map.
 
+## 2026-10-23 (17:10 IST): the first real login, and retries
+
+**The first automated login failed** after 6 s at the browser stage: Dhan answered "Invalid Totp entered, try again". The VPS clock is NTP-synchronised and within a second of Cloudflare's, the code is made exactly as in `blackbox_trage` and sent with at least 25 s of life, so the Dhan TOTP secret saved for the account is the likely cause; the operator checks it. The sidecar's browser closes: `login.mjs` (identical to the reference) closes it in `finally`, `server.mjs` reaps any Chromium left, and no browser process was left in `cbl-login` after the failure.
+
+**Built:** automated logins from the dashboard are tried up to 5 times, 60 s apart, stopping at success or a hopeless failure; a second request while one is retrying is ignored; an unknown account is no longer retried. The tries before the last appear only in the activity log; one Telegram notice after the last try (in the morning window too) asks for a manual login, with the try count and the consents left today. 161 Rust tests (5 new), 23 UI tests.
+
 ## 2026-10-23 (16:35 IST): first deploy, live
 
 **Deployed** `0.1.1-dev.33.ga6d2234ed` with `status.sh --do deploy --yes`. The first try (`0.1.1-dev.32`) stopped at step 8/13 before changing anything: the dump step misread a missing Postgres container as a broken one (`docker inspect … || echo missing` yields a newline plus "missing"). Fixed in `a6d2234`; the app code is the same.

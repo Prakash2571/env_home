@@ -81,7 +81,7 @@ export function AccountCard({ account, now, automation, busy, onLogin }: Account
           type="button"
           className="action primary"
           disabled={busy || running || !automation}
-          title={automation ? "The sidecar fills the account, PIN and TOTP" : "CBL_SIDECAR_URL is not set"}
+          title={automation ? "The sidecar fills the account, PIN and TOTP; up to 5 tries, then Telegram asks for a manual login" : "CBL_SIDECAR_URL is not set"}
           onClick={() => onLogin(account.alias, "automated")}
         >
           Run automated login
