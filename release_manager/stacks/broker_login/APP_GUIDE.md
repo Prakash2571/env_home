@@ -11,7 +11,7 @@ cd /srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login
 
 | Container | Image | Reachable from |
 | --- | --- | --- |
-| `cbl-app` | `cbl-app:<version>` (shipped) | `127.0.0.1:47440` on the host; cloudflared routes the public subdomain here |
+| `cbl-app` | `cbl-app:<version>` (shipped) | `127.0.0.1:47440` on the host; cloudflared → host nginx (`edge/`) → here |
 | `cbl-postgres` | `postgres:17-alpine` (pulled) | `cbl-app` only, over the internal `datastore` network |
 | `cbl-login` | `mcr.microsoft.com/playwright:v1.63.0-noble` (pulled) | `cbl-app` only, as `http://login:8090/login` |
 

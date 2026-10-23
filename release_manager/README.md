@@ -33,7 +33,7 @@ Without a terminal, any operation that would prompt needs `--yes`.
 | Database dumps (mode 700) | `/srv/backup/CENTRALISED_BROKER_LOGIN/backup/db` |
 | Deploy and app logs | `/srv/backup/CENTRALISED_BROKER_LOGIN/logs/{deploy,app}` |
 | Compose project and containers | `centralised_broker_login`: `cbl-app`, `cbl-postgres`, `cbl-login` |
-| Port (loopback only) | `127.0.0.1:47440`, which cloudflared routes the public subdomain to |
+| Port (loopback only) | `127.0.0.1:47440`, reached through cloudflared and the host nginx vhost in `stacks/broker_login/edge/` |
 
 The layout follows the sibling stacks on this box (`ALGO_INDEX_ENGINE`, `BOE_APP`): code and state under `/srv/dev_stack/<PROJECT>`, backups on the separate backup disk under `/srv/backup/<PROJECT>`.
 

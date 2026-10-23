@@ -2,7 +2,7 @@
 
 Every route the service answers, and the contract a trading engine codes against. **A route added or changed is recorded here in the same change.**
 
-The service listens on `CBL_HTTP_ADDR`, which is `0.0.0.0:47440` inside the container and published only as `127.0.0.1:47440` on the VPS. The public subdomain reaches it through the host's Cloudflare Tunnel.
+The service listens on `CBL_HTTP_ADDR`, which is `0.0.0.0:47440` inside the container and published only as `127.0.0.1:47440` on the VPS. The public subdomain reaches it through the host's Cloudflare Tunnel and the host nginx vhost (`release_manager/stacks/broker_login/edge/`), which admits only loopback.
 
 ## Routes
 

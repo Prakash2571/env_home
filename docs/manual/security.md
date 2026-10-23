@@ -13,7 +13,7 @@ What this service protects, who it protects it from, and where each control live
 
 | Layer | Control | Where |
 | --- | --- | --- |
-| Network | the origin listens on `127.0.0.1:47440` only; Postgres is on an internal Docker network; the sidecar publishes no port | `compose.broker_login.yml` |
+| Network | the origin listens on `127.0.0.1:47440` only; the host nginx vhost in front of it admits only loopback (cloudflared), so a forged Access header from the LAN never arrives; Postgres is on an internal Docker network; the sidecar publishes no port | `compose.broker_login.yml`, `edge/nginx-centralised-broker-login.conf` |
 | Edge | Cloudflare Tunnel; Access with Google for the whole host; Bypass only on `/dhan`; Service Auth on `/api/v1` (D4) | [deployment.md](deployment.md) |
 | Crawlers | `robots.txt` disallows everything; every response carries `X-Robots-Tag: noindex…`; Access serves bots a login wall, never the app | `src/api/` |
 | Dashboard | needs the Access identity header; optional email allowlist (D6); state changes need a JSON content type (no cross-site form posts); a strict CSP and `frame-ancestors 'none'` | `src/api/admin.rs`, `src/api/mod.rs` |

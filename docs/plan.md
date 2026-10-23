@@ -48,7 +48,7 @@ beonedge VPS ── 127.0.0.1:47440 ──► app  (Rust: axum API + the built R
 - **app**: one Rust binary (tokio, axum, reqwest with rustls, tokio-postgres). It runs the login scheduler, the token API, Telegram, and the server-sent event (SSE) stream for the UI, and it serves `ui/dist`. Port 47440 is published on loopback only.
 - **login**: the pinned Playwright image plus the copied sidecar scripts. It takes a PIN and a live TOTP, so it has no published port.
 - **postgres**: its own container, on an internal Docker network that only `app` can reach. It does **not** use the `boe-postgres` that serves the other production apps.
-- **Edge**: the `cloudflared` service already running on the VPS is remote-managed (it runs from a token). A new public hostname is added in the Zero Trust dashboard and pointed at `http://127.0.0.1:47440`. There is no Caddy and no nginx in this stack, and no ports 80/443 of its own.
+- **Edge**: the `cloudflared` service already running on the VPS is remote-managed (it runs from a token). A new public hostname is added in the Zero Trust dashboard and pointed at `http://127.0.0.1:47440`. There is no Caddy and no nginx in this stack, and no ports 80/443 of its own. *(Corrected 2026-10-23: the tunnel is locally managed and routes through the host nginx; see [deployment.md](manual/deployment.md), step 1.)*
 
 All three containers run as Docker Compose project `env_home`, under `/home/beonedge/env_home`. The VPS has room: 8 cores, 14 GiB RAM, 400 GB free.
 

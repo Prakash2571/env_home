@@ -9,7 +9,7 @@ Everything needed to put the service on `beonedge` behind a `beonedge.in` subdom
 | SSH | `ssh beonedge` (Tailscale `100.122.85.101`, user `beonedge`, in the `docker` group, no passwordless sudo) |
 | OS, size | Ubuntu 26.04, 8 cores, 14 GiB RAM; `/srv/dev_stack` on its own 458 GB disk; `/srv/backup` on a 1.8 TB disk |
 | Docker | 29.1, compose v5.6 |
-| Edge | `cloudflared` as a systemd service, **remote-managed** (it runs from a token, so routes are set in the Zero Trust dashboard, not in a file) |
+| Edge | tunnel **beus** (`34b2f8f4-7b9b-4ff3-869e-27b145f89b75`), `cloudflared` as a systemd service, **locally managed** (verified 2026-10-23): routes live in `/home/beonedge/.cloudflared/config.yml` and the dashboard cannot change them. Every hostname goes to the host nginx on `localhost:80`, which routes by name |
 | Neighbours | `boe-*`, `market-data-*`, `aie-*` production stacks; ports 47410–47434 taken. This stack uses **47440** |
 | Deploy root | `/srv/dev_stack/CENTRALISED_BROKER_LOGIN` |
 | Backup root | `/srv/backup/CENTRALISED_BROKER_LOGIN` |
@@ -26,13 +26,35 @@ Then run `./release_manager/status.sh` → Provision → Diagnose. It should rep
 
 ## Step 1: the subdomain and the tunnel (D5)
 
-In **Cloudflare Zero Trust → Networks → Tunnels**, open the tunnel the VPS already runs, then go to **Public Hostname → Add**:
+The route follows every other `beonedge.in` site: tunnel → host nginx on `:80` → the app on `127.0.0.1:47440`. Both files are in [`release_manager/stacks/broker_login/edge/`](../../release_manager/stacks/broker_login/edge/). Replace `login` everywhere if D5 picks another name.
 
-- Subdomain: the one you pick (D5), e.g. `login`, on domain `beonedge.in`
-- Service: `HTTP` → `127.0.0.1:47440`
-- Additional settings → HTTP Settings: leave **No TLS Verify** off. The origin is plain HTTP on loopback, so there is nothing to verify.
+**1. The tunnel rule** (no sudo; the file belongs to `beonedge`). Back up `~/.cloudflared/config.yml`, then add the rule from `cloudflared-ingress.yml` **above** the final `- service: http_status:404`, and check it:
 
-Cloudflare creates the DNS record itself. **Never** publish 47440 any other way: the origin trusts the Access identity header because only cloudflared can reach it.
+```bash
+ssh beonedge 'cp ~/.cloudflared/config.yml ~/.cloudflared/config.yml.bak-$(date +%Y%m%d-%H%M%S)'
+ssh beonedge 'cloudflared tunnel ingress validate && cloudflared tunnel ingress rule https://login.beonedge.in'
+```
+
+**2. The DNS record** (no sudo; uses the tunnel's `cert.pem`). It creates the proxied `CNAME login → 34b2f8f4-….cfargotunnel.com`:
+
+```bash
+ssh beonedge 'cloudflared tunnel route dns beus login.beonedge.in'
+```
+
+**3. The nginx site** (your sudo). It admits only `127.0.0.1` and `::1`, because the app trusts the Access identity header and nothing but cloudflared may bring one:
+
+```bash
+scp release_manager/stacks/broker_login/edge/nginx-centralised-broker-login.conf beonedge:/tmp/
+ssh -t beonedge 'sudo install -m 644 /tmp/nginx-centralised-broker-login.conf /etc/nginx/sites-available/centralised-broker-login && sudo ln -sfn /etc/nginx/sites-available/centralised-broker-login /etc/nginx/sites-enabled/centralised-broker-login && sudo nginx -t && sudo systemctl reload nginx'
+```
+
+**4. Load the tunnel rule** (your sudo). A locally managed tunnel reads its config only at start, so this restarts it. Every `beonedge.in` site drops for a few seconds; pick a quiet moment, never during market hours:
+
+```bash
+ssh -t beonedge 'sudo systemctl restart cloudflared && systemctl is-active cloudflared'
+```
+
+Until the app is deployed, `https://login.beonedge.in` answers 502 from nginx. **Create the Access applications (step 3) before the first deploy**, or the dashboard would be open to anyone. **Never** publish 47440 any other way.
 
 ## Step 2: Google sign-in (Google Cloud Console)
 
