@@ -59,22 +59,32 @@ Why it is shaped like this:
 - **A code is accepted once.** Two engines fetching the same account in the same 30 s step: the second gets 409 and retries on the next step. Tokens last about 24 hours, so an engine fetches once a morning and caches.
 - **Every request is recorded** (client ID, account, IP, outcome, reason) and shown on the dashboard.
 
-### Client example (Rust, for `blackbox_trage`)
+### Client example (Rust)
+
+The engine sends its Cloudflare Access service token (D4) and a code from the account's token API seed, names itself in `User-Agent` (Cloudflare bans some library defaults, for example Python's `urllib`, with `403 error code: 1010`), follows no redirects, and caches the token until `expires_in` runs low.
 
 ```rust
 async fn fetch_dhan_token(base: &str, client_id: &str, seed: &[u8]) -> anyhow::Result<String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent(concat!("my-engine/", env!("CARGO_PKG_VERSION")))
+        .build()?;
     for _ in 0..3 {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
-        let totp = code_at(seed, now);
         let response = client
             .post(format!("{base}/api/v1/token"))
-            .json(&serde_json::json!({ "client_id": client_id, "totp": totp }))
+            .header("CF-Access-Client-Id", std::env::var("BROKER_LOGIN_CF_CLIENT_ID")?)
+            .header("CF-Access-Client-Secret", std::env::var("BROKER_LOGIN_CF_CLIENT_SECRET")?)
+            .json(&serde_json::json!({ "client_id": client_id, "totp": code_at(seed, now) }))
             .send()
             .await?;
         match response.status().as_u16() {
-            200 => return Ok(response.json::<serde_json::Value>().await?["access_token"]
-                .as_str().unwrap_or_default().to_owned()),
+            200 => {
+                let body: serde_json::Value = response.json().await?;
+                anyhow::ensure!(body["client_id"] == client_id, "a token for another account");
+                return Ok(body["access_token"].as_str().unwrap_or_default().to_owned());
+            }
             409 | 503 => {
                 let wait = response.headers().get("retry-after")
                     .and_then(|value| value.to_str().ok()?.parse().ok()).unwrap_or(30);
@@ -87,7 +97,7 @@ async fn fetch_dhan_token(base: &str, client_id: &str, seed: &[u8]) -> anyhow::R
 }
 ```
 
-`code_at` is the same RFC 6238 function as in `src/otp.rs`. Copy it, or reuse `blackbox_trage`'s `src/otp.rs`, which is where it came from.
+`code_at` is the RFC 6238 function in `src/otp.rs`. A `401`, a Cloudflare `403` or a redirect stops the fetch: retrying a wrong code in a loop locks the account's API for everyone.
 
 ### From a shell
 
@@ -95,6 +105,7 @@ async fn fetch_dhan_token(base: &str, client_id: &str, seed: &[u8]) -> anyhow::R
 CODE=$(oathtool --totp -b "$TOKEN_API_SEED")   # the seed the Accounts page showed
 curl --fail-with-body -sS -X POST https://<subdomain>.beonedge.in/api/v1/token \
   -H 'content-type: application/json' \
+  -H "CF-Access-Client-Id: $BROKER_LOGIN_CF_CLIENT_ID" -H "CF-Access-Client-Secret: $BROKER_LOGIN_CF_CLIENT_SECRET" \
   -d "{\"client_id\":\"1100000001\",\"totp\":\"$CODE\"}"
 ```
 

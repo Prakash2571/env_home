@@ -12,3 +12,6 @@ ui/dist
 ui/coverage
 sidecar/node_modules
 /data
+
+# Operator hand-overs that name the private subdomain; never committed.
+/handover
