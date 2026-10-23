@@ -25,33 +25,30 @@ Without a complete configuration, the binary still starts. It logs `configuratio
 
 ## Environment variables
 
+**Dhan accounts are not configured here.** They are added on the dashboard's Accounts page and stored sealed in Postgres (see [http-api.md](http-api.md)). `CBL_ACCOUNTS` and `TOKEN_API_TOTP_SECRET` from earlier versions are ignored; the service logs a warning while they still carry a value.
+
 Every key is in both [config/env.example](../../config/env.example) and the deployed [.env.example](../../release_manager/stacks/broker_login/.env.example). The export refuses to ship a bundle if the two differ.
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
-| `CBL_ENCRYPTION_KEY` | yes | — | 64 hex characters; encrypts tokens at rest |
+| `CBL_ENCRYPTION_KEY` | yes | — | 64 hex characters; encrypts the accounts and their tokens at rest |
 | `POSTGRES_PASSWORD` | yes (Postgres) | — | also read by the Postgres container |
 | `POSTGRES_DB`, `POSTGRES_USER` | | `broker_login` | |
 | `CBL_DATABASE_HOST`, `CBL_DATABASE_PORT` | | `127.0.0.1`, `5432` | compose sets the host to `postgres` |
 | `CBL_DATABASE_URL` | | — | overrides the above; any libpq string (D9) |
 | `CBL_STORE` | | `postgres` | `memory` for throwaway local runs |
-| `CBL_ACCOUNTS` | yes | — | comma-separated aliases (letters, digits, `_`), logged in in this order |
-| `DHAN_<ALIAS>_CLIENT_ID` | yes | — | the Dhan client ID; also what an engine sends to the token API |
-| `DHAN_<ALIAS>_API_KEY`, `_API_SECRET` | yes | — | from that account's Dhan API app |
-| `DHAN_<ALIAS>_ACCOUNT_ID` | yes | — | what the login form's first box takes (mobile number or client ID) |
-| `DHAN_<ALIAS>_ACCOUNT_PIN` | yes | — | the account PIN |
-| `DHAN_<ALIAS>_TOTP_SECRET` | yes | — | base32 Dhan authenticator seed |
-| `TOKEN_API_<ALIAS>_TOTP_SECRET` | one of these two | — | the seed engines use for this account (D3) |
-| `TOKEN_API_TOTP_SECRET` | one of these two | — | one shared seed for every account without its own (D3) |
 | `DHAN_REDIRECT_URL` | yes | — | the public callback registered with every Dhan API app; its path becomes the route |
 | `CBL_SIDECAR_URL` | | — | e.g. `http://login:8090/login`; without it only manual logins work |
 | `CBL_LOGIN_WINDOW` | | `08:00-08:30` | IST |
 | `CBL_LOGIN_DAYS` | | `mon-fri` | lists and ranges: `mon,wed-fri` |
 | `CBL_HTTP_ADDR` | | `127.0.0.1:47440` | the image sets `0.0.0.0:47440` |
 | `CBL_HOME` | | `.` | the UI is served from `$CBL_HOME/ui/dist` |
-| `CBL_ADMIN_REQUIRE_ACCESS` | | `true` | the dashboard API needs the Access identity |
+| `CBL_ACCESS_TEAM_DOMAIN` | with either Access check | — | `https://<team>.cloudflareaccess.com`; the JWT issuer and where its certs come from |
+| `CBL_ACCESS_DASHBOARD_AUD` | with `CBL_ADMIN_REQUIRE_ACCESS` | — | the dashboard Access app's AUD tag |
+| `CBL_ACCESS_API_AUD` | with `CBL_API_REQUIRE_ACCESS_JWT` | — | the token API Access app's AUD tag |
+| `CBL_ADMIN_REQUIRE_ACCESS` | | `true` | the dashboard needs a verified Access sign-in; `false` only for local runs |
 | `CBL_ADMIN_EMAILS` | | — | allowlist (D6) |
-| `CBL_API_REQUIRE_ACCESS_JWT` | | `false` | token API demands Access's header too (D4) |
+| `CBL_API_REQUIRE_ACCESS_JWT` | | `false` | the token API also needs a verified Access service token (D4: `true` on the VPS) |
 | `CBL_CLIENT_IP_HEADER` | | `cf-connecting-ip` | `none` to use the socket peer |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | together or neither | — | D8 |
 | `CBL_DHAN_AUTH_BASE`, `CBL_TELEGRAM_API` | | the real ones | test-only overrides |

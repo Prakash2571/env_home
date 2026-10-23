@@ -2,6 +2,16 @@
 
 **What is built, what was verified, and what is open.** A new dated section after every change lands, newest first. The commit bodies carry the detail; this is the map.
 
+## 2026-10-23 (afternoon): the Accounts page and verified Access sign-ins
+
+Decided with the operator (A13): Dhan accounts live on the dashboard only, the Access signature check ships with them, and both come before the first deploy.
+
+**Built** (`4cfbc91`, `d4d5cba`): accounts sealed in Postgres (migration 0002) and loaded at start with retries; a live registry the engine, scheduler and token API share, so changes need no restart; per-account token API seeds generated and shown once; add, remove and new-seed routes that need the alias typed back; the Accounts tab. Cloudflare Access JWTs are verified (RS256 via `ring`, cached team certs, issuer and AUD), closing the local header-forgery gap. Responses without their own policy get `Cache-Control: no-cache`, so a deploy reaches browsers without a hard reload. The env templates lost the nine account keys and gained `CBL_ACCESS_TEAM_DOMAIN`, `CBL_ACCESS_DASHBOARD_AUD`, `CBL_ACCESS_API_AUD` (20 keys).
+
+**Verified:** 154 Rust tests on a fresh Postgres (from 127), 22 UI tests at 98.3% of lines, clippy `-D warnings` and `cargo audit` clean; the page checked in a browser against the real binary, at desktop and 375 px.
+
+**For the VPS `.env`:** fill the three `CBL_ACCESS_*` values and `CBL_ADMIN_EMAILS`; the old `CBL_ACCOUNTS`, `DHAN_MAIN_*` and `TOKEN_API_*` lines can be deleted (they are ignored, and named in a warning while they still have a value).
+
 ## 2026-10-23: the tunnel is locally managed
 
 Opening the Cloudflare dashboard showed the VPS tunnel **beus** is locally managed: its routes are in `/home/beonedge/.cloudflared/config.yml`, and every hostname goes to the host nginx on `:80`. The docs had assumed a dashboard-managed tunnel pointing straight at `127.0.0.1:47440`. Added `release_manager/stacks/broker_login/edge/` (the nginx vhost, which admits only loopback, and the tunnel rule) and rewrote step 1 of [deployment.md](manual/deployment.md) as four commands. Two of them need your sudo, and one restarts `cloudflared`. Nothing on the VPS or in Cloudflare is changed yet.

@@ -48,8 +48,8 @@ docker exec -i cbl-postgres sh -c 'pg_restore --clean --if-exists --no-owner \
 ./broker_login_rollback.sh --to <the version the dump was taken before>
 ```
 
-Tokens minted after the dump are gone. Run a fresh login from the UI for each account afterwards.
+Tokens minted and accounts added after the dump are gone. Add those accounts again on the Accounts page, then run a fresh login for each.
 
 ## Keys you must never lose
 
-`CBL_ENCRYPTION_KEY` in `.env` encrypts every stored token. Back it up **apart from** the database dumps. A dump without the key is unreadable, and a key stored beside its dump protects nothing.
+`CBL_ENCRYPTION_KEY` in `.env` encrypts every stored account and token. Back it up **apart from** the database dumps. A dump without the key is unreadable, and a key stored beside its dump protects nothing.

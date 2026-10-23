@@ -1,6 +1,6 @@
 # Build plan: broker login and token service
 
-Status: **approved 2026-10-22; built on `tamagami-hi/dev` (see [build-log.md](build-log.md)).** Decisions D1–D9 stay open in [decisions.md](decisions.md). Section 8 below describes the state when the plan was written.
+Status: **approved 2026-10-22; built on `tamagami-hi/dev` (see [build-log.md](build-log.md)).** Decisions are in [decisions.md](decisions.md); several were decided after approval (A10–A13). Section 8 below describes the state when the plan was written.
 
 ## 1. What this service is
 
@@ -84,7 +84,7 @@ Content-Type: application/json
 4. Manual paths from the UI: **Run automated login now** for one account or all, and **Open consent link** to log in by hand.
 5. Each account needs **its own Dhan API app**, registered with the same redirect URL. The registered URL is the public `/dhan/callback`, which must bypass Cloudflare Access because Dhan's servers can't sign in.
 
-The broker credentials live in the VPS `.env`, one prefix per account, the same pattern as the reference: `ACCOUNTS=main,helper2,…`, then `DHAN_MAIN_CLIENT_ID`, `_API_KEY`, `_API_SECRET`, `_ACCOUNT_PIN`, `_TOTP_SECRET`, and the API seed `TOKEN_API_MAIN_TOTP_SECRET`. The UI never accepts or shows these values.
+The broker credentials live in the VPS `.env`, one prefix per account, the same pattern as the reference: `ACCOUNTS=main,helper2,…`, then `DHAN_MAIN_CLIENT_ID`, `_API_KEY`, `_API_SECRET`, `_ACCOUNT_PIN`, `_TOTP_SECRET`, and the API seed `TOKEN_API_MAIN_TOTP_SECRET`. The UI never accepts or shows these values. *(Replaced 2026-10-23 by A13: accounts are added on the dashboard's Accounts page, sealed in Postgres; the UI accepts these values once and never shows them. See [decisions.md](decisions.md).)*
 
 ## 6. The web page
 

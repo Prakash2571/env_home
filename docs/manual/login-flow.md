@@ -7,7 +7,7 @@ How an account gets its token each morning, and what each stage on the dashboard
 | # | Stage | What happens | Fails when |
 | --- | --- | --- | --- |
 | 1 | consent | `POST auth.dhan.co/app/generate-consent` with the account's API key and secret, giving a one-time consent URL. Counted against Dhan's cap of **25 a day** per account, and the count is checked before Dhan is called. | wrong API key or secret, the day's cap spent, Dhan down |
-| 2 | browser | **Automated:** the Playwright sidecar opens the consent URL and fills the account ID, the PIN and a fresh TOTP from `DHAN_<ALIAS>_TOTP_SECRET`. A code is sent only with 25 s or more of life left, and never twice. **Manual:** skipped; the card shows the consent link for a person to open. | a wrong PIN or code, a lockout, an SMS OTP prompt, a changed page |
+| 2 | browser | **Automated:** the Playwright sidecar opens the consent URL and fills the Dhan login ID, the PIN and a fresh TOTP from the account's Dhan TOTP secret, all entered on the Accounts page. A code is sent only with 25 s or more of life left, and never twice. **Manual:** skipped; the card shows the consent link for a person to open. | a wrong PIN or code, a lockout, an SMS OTP prompt, a changed page |
 | 3 | callback | Dhan redirects to `DHAN_REDIRECT_URL` with a `tokenId`. Automated: the sidecar catches it in the browser. Manual: the public `/dhan/callback` route receives it and validates it before use. | nobody finishes within 5 minutes (manual) |
 | 4 | token exchange | `GET auth.dhan.co/app/consumeApp-consent` gives the access token and its expiry. The returned client ID must equal the account's. | a different client ID, an expired session |
 | 5 | stored encrypted | AES-256-GCM under `CBL_ENCRYPTION_KEY`, bound to `alias:client_id`, written to Postgres | the database unreachable |
@@ -39,3 +39,7 @@ Messages are HTML with every value escaped, split on line breaks under Telegram'
 ## When the broker changes its page
 
 The sidecar finds each box by the text around it (`sidecar/prompt.mjs`), not by fixed selectors. It refuses to type into a box it can't name, and it never sends the same value twice. If Dhan changes the page so that it stops working, see `release_manager/stacks/broker_login/APP_GUIDE.md` for the fix-without-a-release path.
+
+## Where the accounts come from
+
+Accounts are added on the dashboard's **Accounts** page, not in the `.env`. Each is sealed (AES-256-GCM under `CBL_ENCRYPTION_KEY`, bound to its alias and client ID) in the `broker_accounts` table and logged in in the order it was added. At start the service opens every stored account, retrying while Postgres is not up yet; a row that will not open, for example after the key changed, is skipped and reported in the activity log. An added account joins the next scheduled login without a restart; a removed one is dropped at once, but never in the middle of its own login.

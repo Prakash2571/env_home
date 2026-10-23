@@ -47,7 +47,7 @@ ssh beonedge "cloudflared tunnel ingress validate && cloudflared tunnel ingress 
 ssh beonedge "cloudflared tunnel route dns beus $CBL_HOST"
 ```
 
-**3. The nginx site** (your sudo). It admits only `127.0.0.1` and `::1`, because the app trusts the Access identity header and nothing but cloudflared may bring one:
+**3. The nginx site** (your sudo). It admits only `127.0.0.1` and `::1`, so nothing but cloudflared reaches the app through nginx (the app verifies Access's JWT as well):
 
 ```bash
 sed "s/__CBL_HOSTNAME__/$CBL_HOST/" release_manager/stacks/broker_login/edge/nginx-centralised-broker-login.conf | ssh beonedge 'cat > /tmp/nginx-centralised-broker-login.conf'
@@ -88,7 +88,7 @@ Checked from outside: `/` and `/health` redirect to the Access login, `/dhan/cal
 
 ## Step 4: Dhan
 
-For **each account**, in its Dhan web dashboard → *DhanHQ Trading APIs* → create (or edit) an API app with redirect URL `https://<subdomain>.beonedge.in/dhan/callback`. The API key and secret go into `DHAN_<ALIAS>_API_KEY` and `_API_SECRET`. The account's authenticator seed (from enabling TOTP on Dhan) goes into `DHAN_<ALIAS>_TOTP_SECRET`.
+For **each account**, in its Dhan web dashboard → *DhanHQ Trading APIs* → create (or edit) an API app with redirect URL `https://<subdomain>.beonedge.in/dhan/callback`. Keep its API key and secret, and the account's authenticator seed (from enabling TOTP on Dhan), for the **Accounts** page after the first deploy. None of them goes in the `.env`.
 
 ## Step 5: Cloudflare hardening (phase 6, when you're ready)
 
@@ -98,22 +98,18 @@ For **each account**, in its Dhan web dashboard → *DhanHQ Trading APIs* → cr
 
 ## Step 6: `.env` and the first deploy
 
-1. Generate the secrets on your own machine:
+1. Generate the secrets in a terminal of your own, not through an agent session:
 
    ```bash
    openssl rand -hex 32
    ```
 
-   Use it for `CBL_ENCRYPTION_KEY`, and a separate run for `POSTGRES_PASSWORD`. Generate a base32 seed per account for the token API (D3), for example:
-
-   ```bash
-   python3 -c "import base64,os;print(base64.b32encode(os.urandom(20)).decode())"
-   ```
-
-2. Write `/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/.env` from `.env.example`, then `chmod 600` it.
-3. `./release_manager/status.sh` → Export → Build bundle, then Ship + Deploy → Ship + deploy.
-4. Open the subdomain, sign in with Google, check the cards, and run **Manual login** once per account to prove the callback route works end to end.
-5. Put each API seed into the engine that will fetch that account's token, ideally by scanning it into an authenticator app as well, so a person can test with `curl`.
+   One run for `CBL_ENCRYPTION_KEY` (keep a copy apart from the backups), another for `POSTGRES_PASSWORD`.
+2. Collect the Access settings: `CBL_ACCESS_TEAM_DOMAIN` is `https://<team>.cloudflareaccess.com`; `CBL_ACCESS_DASHBOARD_AUD` and `CBL_ACCESS_API_AUD` are the *Application Audience (AUD) Tag* on the Overview of `broker-login` and `broker-login-api`.
+3. Write `/srv/dev_stack/CENTRALISED_BROKER_LOGIN/broker_login/.env` from `.env.example`, then `chmod 600` it. Set `DHAN_REDIRECT_URL` and `CBL_ADMIN_EMAILS` (A11); `CBL_API_REQUIRE_ACCESS_JWT=true` is already there (A12).
+4. `./release_manager/status.sh` → Export → Build bundle, then Ship + Deploy → Ship + deploy.
+5. Open the subdomain, sign in with Google, go to **Accounts** and add each Dhan account. Store the token API seed it shows **once** where the engine will read it.
+6. On **Logins**, run **Manual login** once per account to prove the callback works end to end.
 
 ## Backups
 

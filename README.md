@@ -28,9 +28,9 @@ Highest first:
 **Safety. Breaking any of these fails the work, whatever the tests say.**
 
 1. **Never deploy unasked.** Images are built locally; the operator runs `release_manager/status.sh`. An agent exports or ships only when asked, and never runs `sudo` on the VPS.
-2. **`.env` belongs to the operator.** Never print its values, never commit one, never change a credential. No script reads, writes or removes the VPS `.env`.
+2. **`.env` belongs to the operator.** Never print its values, never commit one, never change a credential. No script reads, writes or removes the VPS `.env`. Dhan accounts are not in it: they are added on the dashboard's Accounts page.
 3. **A secret never leaves its place.** Tokens, PINs, seeds, API secrets and the bot token never go in a log, an error message, a Telegram notice, the dashboard, a URL or a commit. The dashboard shows a client ID only as `••••1234`.
-4. **A token API seed is never a broker seed.** The service refuses to start if they match; never weaken that check.
+4. **A token API seed is generated, never typed.** The service makes each account's seed and shows it once; never add a way to set one by hand, or to read one back.
 5. **The token API refuses alike.** An unknown client ID and a wrong code get the same reply and the same lockout. Never add a reply that tells them apart.
 6. **This VPS is shared.** Every docker command is scoped to project `centralised_broker_login`, its `cbl-*` containers and its `cbl-*` images. Never prune globally, and never restart `cloudflared`.
 7. **Migrations stay compatible with the previous release** (add a column in one release, drop it a later one), because rollback swaps images and keeps the database.
