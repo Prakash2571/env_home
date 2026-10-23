@@ -69,9 +69,12 @@ async fn harness(fakes: Fakes, manual_timeout: Duration) -> (Arc<LoginEngine>, S
     };
     let accounts = vec![account("main", "1100000001")];
     let store = Store::Memory(MemoryStore::default());
+    let live = LiveState::new(&accounts);
+    let registry = crate::accounts::Registry::default();
+    registry.replace_all(accounts);
     let engine = LoginEngine::new(EngineParts {
-        live: LiveState::new(&accounts),
-        accounts,
+        live,
+        accounts: registry,
         dhan: DhanAuth::new(&dhan).unwrap(),
         sidecar,
         gate: CallbackGate::new(parse_redirect("https://login.example.in/dhan/callback").unwrap()),
@@ -110,7 +113,7 @@ async fn an_automated_login_runs_every_stage_and_stores_a_token_that_opens() {
     assert!(view.token.is_some() && view.consent_url.is_none());
     let open = engine
         .vault()
-        .open_valid(engine.account("main").unwrap(), now_unix())
+        .open_valid(&engine.account("main").unwrap(), now_unix())
         .await
         .unwrap()
         .unwrap();
@@ -145,7 +148,7 @@ async fn a_lockout_from_the_sidecar_stops_the_account_for_the_day_and_keeps_the_
     assert!(
         engine
             .vault()
-            .latest(engine.account("main").unwrap())
+            .latest(&engine.account("main").unwrap())
             .await
             .unwrap()
             .is_none()

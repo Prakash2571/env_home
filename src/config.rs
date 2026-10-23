@@ -3,26 +3,12 @@ use std::path::PathBuf;
 
 use reqwest::Url;
 
+use crate::access::AccessVerifier;
 use crate::clock::LoginWindow;
-use crate::otp::decode_base32;
 
 pub const DEFAULT_HTTP_ADDR: &str = "127.0.0.1:47440";
 pub const DEFAULT_DHAN_AUTH_BASE: &str = "https://auth.dhan.co";
 pub const DEFAULT_TELEGRAM_API: &str = "https://api.telegram.org";
-const ALIAS_MAX: usize = 32;
-
-#[derive(Clone)]
-pub struct Account {
-    pub alias: String,
-    pub client_id: String,
-    pub api_key: String,
-    pub api_secret: String,
-    pub account_id: String,
-    pub pin: String,
-    pub dhan_totp_seed: Vec<u8>,
-    pub api_totp_seed: Vec<u8>,
-    pub api_seed_shared: bool,
-}
 
 #[derive(Clone, Debug)]
 pub enum StoreConfig {
@@ -37,16 +23,25 @@ pub struct TelegramConfig {
     pub api_base: String,
 }
 
+/// A Cloudflare Access check: the team's verifier and one application's AUD tag.
+#[derive(Clone, Debug)]
+pub struct AccessCheck {
+    pub verifier: AccessVerifier,
+    pub audience: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct ApiPolicy {
     pub require_access_jwt: bool,
     pub client_ip_header: Option<String>,
+    pub access: Option<AccessCheck>,
 }
 
 #[derive(Clone, Debug)]
 pub struct AdminPolicy {
     pub require_access_identity: bool,
     pub allowed_emails: Vec<String>,
+    pub access: Option<AccessCheck>,
 }
 
 #[derive(Clone)]
@@ -55,7 +50,6 @@ pub struct Config {
     pub home: PathBuf,
     pub store: StoreConfig,
     pub encryption_key: String,
-    pub accounts: Vec<Account>,
     pub redirect_url: Url,
     pub sidecar_url: Option<String>,
     pub dhan_auth_base: String,
@@ -63,17 +57,6 @@ pub struct Config {
     pub window: LoginWindow,
     pub api: ApiPolicy,
     pub admin: AdminPolicy,
-}
-
-impl std::fmt::Debug for Account {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("Account")
-            .field("alias", &self.alias)
-            .field("client_id", &crate::state::client_id_hint(&self.client_id))
-            .field("api_seed_shared", &self.api_seed_shared)
-            .finish_non_exhaustive()
-    }
 }
 
 impl std::fmt::Debug for TelegramConfig {
@@ -91,7 +74,6 @@ impl std::fmt::Debug for Config {
         formatter
             .debug_struct("Config")
             .field("http_addr", &self.http_addr)
-            .field("accounts", &self.accounts)
             .field("redirect_url", &self.redirect_url.as_str())
             .field("sidecar_url", &self.sidecar_url)
             .field("telegram", &self.telegram)
@@ -109,10 +91,36 @@ pub struct Basics {
     pub http_addr: SocketAddr,
     pub home: PathBuf,
     pub admin: AdminPolicy,
+    pub access: Option<AccessVerifier>,
 }
 
-pub fn admin_policy(read: &dyn Fn(&str) -> Option<String>) -> AdminPolicy {
+fn team_domain(read: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    text(read, "CBL_ACCESS_TEAM_DOMAIN").filter(|value| {
+        Url::parse(value).is_ok_and(|url| url.scheme() == "https" && url.host_str().is_some())
+    })
+}
+
+pub fn access_verifier(read: &dyn Fn(&str) -> Option<String>) -> Option<AccessVerifier> {
+    team_domain(read).and_then(|domain| AccessVerifier::new(&domain).ok())
+}
+
+fn access_check(
+    read: &dyn Fn(&str) -> Option<String>,
+    verifier: Option<&AccessVerifier>,
+    audience_variable: &str,
+) -> Option<AccessCheck> {
+    Some(AccessCheck {
+        verifier: verifier?.clone(),
+        audience: text(read, audience_variable)?,
+    })
+}
+
+pub fn admin_policy(
+    read: &dyn Fn(&str) -> Option<String>,
+    verifier: Option<&AccessVerifier>,
+) -> AdminPolicy {
     AdminPolicy {
+        access: access_check(read, verifier, "CBL_ACCESS_DASHBOARD_AUD"),
         require_access_identity: flag(read, "CBL_ADMIN_REQUIRE_ACCESS", true),
         allowed_emails: text(read, "CBL_ADMIN_EMAILS")
             .map(|value| {
@@ -135,10 +143,12 @@ pub fn basics(read: &dyn Fn(&str) -> Option<String>) -> Basics {
                 .expect("the default address parses")
         });
     let home = text(read, "CBL_HOME").map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let access = access_verifier(read);
     Basics {
         http_addr,
         home,
-        admin: admin_policy(read),
+        admin: admin_policy(read, access.as_ref()),
+        access,
     }
 }
 
@@ -168,27 +178,17 @@ impl Reader<'_> {
             String::new()
         })
     }
+}
 
-    fn printable(&mut self, name: &str) -> String {
-        let value = self.required(name);
-        if !value.is_empty() && !value.bytes().all(|byte| byte.is_ascii_graphic()) {
-            self.problems
-                .push(format!("{name} must be printable ASCII without spaces"));
-        }
-        value
-    }
+/// Account variables from before accounts moved to the dashboard. They are
+/// ignored; the service names any that still carry a value so they get removed.
+const RETIRED_VARIABLES: [&str; 2] = ["CBL_ACCOUNTS", "TOKEN_API_TOTP_SECRET"];
 
-    fn seed(&mut self, name: &str) -> Vec<u8> {
-        let value = self.required(name);
-        if value.is_empty() {
-            return Vec::new();
-        }
-        decode_base32(&value).unwrap_or_else(|_| {
-            self.problems
-                .push(format!("{name} is not a base32 TOTP seed"));
-            Vec::new()
-        })
-    }
+pub fn retired_variables(read: &dyn Fn(&str) -> Option<String>) -> Vec<&'static str> {
+    RETIRED_VARIABLES
+        .into_iter()
+        .filter(|name| text(read, name).is_some())
+        .collect()
 }
 
 pub fn load(read: &dyn Fn(&str) -> Option<String>) -> Result<Config, ConfigGap> {
@@ -200,6 +200,7 @@ pub fn load(read: &dyn Fn(&str) -> Option<String>) -> Result<Config, ConfigGap> 
         http_addr,
         home,
         admin,
+        access,
     } = basics(read);
     if let Some(value) = text(read, "CBL_HTTP_ADDR")
         && value.parse::<SocketAddr>().is_err()
@@ -217,12 +218,12 @@ pub fn load(read: &dyn Fn(&str) -> Option<String>) -> Result<Config, ConfigGap> 
             .push("CBL_ENCRYPTION_KEY must be 64 hex characters".into());
     }
 
-    let accounts = load_accounts(&mut reader);
     let redirect_url = load_redirect(&mut reader);
     let window = load_window(&mut reader);
     let telegram = load_telegram(&mut reader);
 
     let api = ApiPolicy {
+        access: access_check(read, access.as_ref(), "CBL_ACCESS_API_AUD"),
         require_access_jwt: flag(read, "CBL_API_REQUIRE_ACCESS_JWT", false),
         client_ip_header: match text(read, "CBL_CLIENT_IP_HEADER") {
             Some(value) if value.eq_ignore_ascii_case("none") => None,
@@ -230,6 +231,8 @@ pub fn load(read: &dyn Fn(&str) -> Option<String>) -> Result<Config, ConfigGap> 
             None => Some("cf-connecting-ip".into()),
         },
     };
+
+    check_access(&mut reader, &admin, &api);
 
     if !reader.problems.is_empty() {
         return Err(ConfigGap {
@@ -241,7 +244,6 @@ pub fn load(read: &dyn Fn(&str) -> Option<String>) -> Result<Config, ConfigGap> 
         home,
         store,
         encryption_key,
-        accounts,
         redirect_url: redirect_url.expect("validated above"),
         sidecar_url: text(read, "CBL_SIDECAR_URL"),
         dhan_auth_base: text(read, "CBL_DHAN_AUTH_BASE")
@@ -251,6 +253,29 @@ pub fn load(read: &dyn Fn(&str) -> Option<String>) -> Result<Config, ConfigGap> 
         api,
         admin,
     })
+}
+
+/// A check that is on but cannot verify anything would refuse every request,
+/// so it is a configuration problem rather than a silent lock-out.
+fn check_access(reader: &mut Reader<'_>, admin: &AdminPolicy, api: &ApiPolicy) {
+    if text(reader.read, "CBL_ACCESS_TEAM_DOMAIN").is_some() && team_domain(reader.read).is_none() {
+        reader.problems.push(
+            "CBL_ACCESS_TEAM_DOMAIN must be the team's https:// Access domain, e.g. https://<team>.cloudflareaccess.com"
+                .into(),
+        );
+    }
+    if admin.require_access_identity && admin.access.is_none() {
+        reader.problems.push(
+            "CBL_ACCESS_TEAM_DOMAIN and CBL_ACCESS_DASHBOARD_AUD are required while CBL_ADMIN_REQUIRE_ACCESS is on"
+                .into(),
+        );
+    }
+    if api.require_access_jwt && api.access.is_none() {
+        reader.problems.push(
+            "CBL_ACCESS_TEAM_DOMAIN and CBL_ACCESS_API_AUD are required while CBL_API_REQUIRE_ACCESS_JWT is on"
+                .into(),
+        );
+    }
 }
 
 fn load_store(reader: &mut Reader<'_>) -> StoreConfig {
@@ -269,100 +294,6 @@ fn load_store(reader: &mut Reader<'_>) -> StoreConfig {
     StoreConfig::Postgres(format!(
         "host={host} port={port} dbname={database} user={user} password={password}"
     ))
-}
-
-fn valid_alias(alias: &str) -> bool {
-    !alias.is_empty()
-        && alias.len() <= ALIAS_MAX
-        && alias
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-}
-
-fn load_accounts(reader: &mut Reader<'_>) -> Vec<Account> {
-    let aliases: Vec<String> = text(reader.read, "CBL_ACCOUNTS")
-        .unwrap_or_default()
-        .split(',')
-        .map(|alias| alias.trim().to_ascii_lowercase())
-        .filter(|alias| !alias.is_empty())
-        .collect();
-    if aliases.is_empty() {
-        reader.problems.push("CBL_ACCOUNTS names no account".into());
-        return Vec::new();
-    }
-
-    let shared_seed = text(reader.read, "TOKEN_API_TOTP_SECRET");
-    let mut accounts: Vec<Account> = Vec::new();
-    for alias in aliases {
-        if !valid_alias(&alias) {
-            reader.problems.push(format!(
-                "CBL_ACCOUNTS alias {alias:?} must be letters, digits or _"
-            ));
-            continue;
-        }
-        if accounts.iter().any(|account| account.alias == alias) {
-            reader
-                .problems
-                .push(format!("CBL_ACCOUNTS lists {alias} twice"));
-            continue;
-        }
-        accounts.push(load_account(reader, &alias, shared_seed.as_deref()));
-    }
-
-    for (index, account) in accounts.iter().enumerate() {
-        if accounts[..index]
-            .iter()
-            .any(|other| other.client_id == account.client_id && !account.client_id.is_empty())
-        {
-            reader.problems.push(format!(
-                "two accounts share the client ID of {}",
-                account.alias
-            ));
-        }
-    }
-    accounts
-}
-
-fn load_account(reader: &mut Reader<'_>, alias: &str, shared_seed: Option<&str>) -> Account {
-    let upper = alias.to_ascii_uppercase();
-    let name = |field: &str| format!("DHAN_{upper}_{field}");
-    let own_seed_name = format!("TOKEN_API_{upper}_TOTP_SECRET");
-
-    let client_id = reader.printable(&name("CLIENT_ID"));
-    let api_key = reader.printable(&name("API_KEY"));
-    let api_secret = reader.printable(&name("API_SECRET"));
-    let account_id = reader.printable(&name("ACCOUNT_ID"));
-    let pin = reader.printable(&name("ACCOUNT_PIN"));
-    let dhan_totp_seed = reader.seed(&name("TOTP_SECRET"));
-
-    let (api_totp_seed, api_seed_shared) = if text(reader.read, &own_seed_name).is_some() {
-        (reader.seed(&own_seed_name), false)
-    } else if shared_seed.is_some() {
-        (reader.seed("TOKEN_API_TOTP_SECRET"), true)
-    } else {
-        reader.problems.push(format!(
-            "{own_seed_name} (or the shared TOKEN_API_TOTP_SECRET) is missing"
-        ));
-        (Vec::new(), false)
-    };
-
-    if !api_totp_seed.is_empty() && api_totp_seed == dhan_totp_seed {
-        reader.problems.push(format!(
-            "the token API seed for {alias} equals its Dhan seed; a code that fetches a token must not log in to Dhan"
-        ));
-    }
-
-    Account {
-        alias: alias.to_owned(),
-        client_id,
-        api_key,
-        api_secret,
-        account_id,
-        pin,
-        dhan_totp_seed,
-        api_totp_seed,
-        api_seed_shared,
-    }
 }
 
 fn load_redirect(reader: &mut Reader<'_>) -> Option<Url> {

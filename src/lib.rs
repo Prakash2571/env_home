@@ -1,3 +1,5 @@
+pub mod access;
+pub mod accounts;
 pub mod api;
 pub mod app;
 pub mod clock;
@@ -14,3 +16,7 @@ pub mod vault;
 #[cfg(test)]
 #[path = "../tests/unit/support.rs"]
 pub mod test_support;
+
+#[cfg(test)]
+#[path = "../tests/unit/api_harness.rs"]
+pub mod api_harness;

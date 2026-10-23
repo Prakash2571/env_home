@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 
+use crate::accounts::{AccountBook, Registry};
 use crate::api::{self, AppContext, Running, VERSION};
 use crate::clock::now_unix;
 use crate::config::{self, AdminPolicy, Config, StoreConfig};
@@ -46,9 +47,16 @@ pub async fn build(config: Config, started_at: i64) -> Result<AppContext> {
         .as_deref()
         .map(Sidecar::new)
         .transpose()?;
-    let live = LiveState::new(&config.accounts);
+    let live = LiveState::new(&[]);
+    let registry = Registry::default();
+    let book = AccountBook::new(
+        registry.clone(),
+        store.clone(),
+        cipher.clone(),
+        live.clone(),
+    );
     let engine = LoginEngine::new(EngineParts {
-        accounts: config.accounts.clone(),
+        accounts: registry,
         dhan: DhanAuth::new(&config.dhan_auth_base)?,
         sidecar,
         gate: CallbackGate::new(config.redirect_url.clone()),
@@ -57,7 +65,7 @@ pub async fn build(config: Config, started_at: i64) -> Result<AppContext> {
         notifier: notifier.clone(),
         manual_timeout: MANUAL_TIMEOUT,
     });
-    engine.refresh_token_views().await;
+    tokio::spawn(load_accounts(book.clone(), Arc::clone(&engine)));
 
     let (scheduler, handle) = Scheduler::new(
         Arc::clone(&engine),
@@ -66,20 +74,12 @@ pub async fn build(config: Config, started_at: i64) -> Result<AppContext> {
     );
     tokio::spawn(scheduler.run());
 
-    let aliases: Vec<&str> = config
-        .accounts
-        .iter()
-        .map(|account| account.alias.as_str())
-        .collect();
-    engine.live().note(
-        EventKind::System,
-        None,
-        format!("service started with {}", aliases.join(", ")),
-    );
+    engine
+        .live()
+        .note(EventKind::System, None, "service started");
     notifier.send(
         &Notice::info(Topic::System, "the broker login service started")
             .fact("version", VERSION)
-            .fact("accounts", aliases.join(", "))
             .fact("login window", config.window.label())
             .fact(
                 "browser sidecar",
@@ -90,11 +90,12 @@ pub async fn build(config: Config, started_at: i64) -> Result<AppContext> {
                 },
             ),
     );
-    tracing::info!(accounts = %aliases.join(","), window = %config.window.label(), "ready");
+    tracing::info!(window = %config.window.label(), "ready");
 
     Ok(AppContext {
         running: Some(Running {
             engine,
+            book,
             scheduler: handle,
             window_label: config.window.label(),
             window: config.window.clone(),
@@ -108,6 +109,35 @@ pub async fn build(config: Config, started_at: i64) -> Result<AppContext> {
         started_at,
     })
 }
+
+/// Opens the stored accounts, retrying while the store is unreachable: the app
+/// can start before Postgres accepts connections. Until then the dashboard
+/// refuses account changes and the scheduler has nobody to log in.
+async fn load_accounts(book: AccountBook, engine: Arc<LoginEngine>) {
+    let mut wait = ACCOUNT_LOAD_RETRY_FIRST;
+    loop {
+        match book.load().await {
+            Ok(count) => {
+                tracing::info!(accounts = count, "accounts loaded");
+                engine.live().note(
+                    EventKind::System,
+                    None,
+                    format!("{count} account(s) loaded from the store"),
+                );
+                engine.refresh_token_views().await;
+                return;
+            }
+            Err(error) => {
+                tracing::warn!(%error, retry_in = ?wait, "could not load the accounts yet");
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(ACCOUNT_LOAD_RETRY_MAX);
+            }
+        }
+    }
+}
+
+const ACCOUNT_LOAD_RETRY_FIRST: std::time::Duration = std::time::Duration::from_secs(1);
+const ACCOUNT_LOAD_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub async fn run() -> Result<()> {
     let _ = dotenvy::dotenv();
@@ -125,6 +155,13 @@ pub async fn run() -> Result<()> {
     let console = basics.home.join("ui").join("dist");
     let started_at = now_unix();
     tracing::info!(version = VERSION, "starting the broker login service");
+    let retired = config::retired_variables(&read);
+    if !retired.is_empty() {
+        tracing::warn!(
+            "{} no longer read: accounts are added on the dashboard; remove them from the .env",
+            retired.join(", ")
+        );
+    }
 
     let context = match config::load(&read) {
         Ok(config) => build(config, started_at).await?,

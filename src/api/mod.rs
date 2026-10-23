@@ -1,3 +1,4 @@
+mod accounts;
 mod admin;
 pub mod guard;
 mod public;
@@ -10,7 +11,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderName, HeaderValue, header};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use serde::Serialize;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -29,6 +30,7 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self'; st
 
 pub struct Running {
     pub engine: Arc<LoginEngine>,
+    pub book: crate::accounts::AccountBook,
     pub scheduler: SchedulerHandle,
     pub window_label: String,
     pub window: crate::clock::LoginWindow,
@@ -65,6 +67,7 @@ pub struct Snapshot {
     pub store: Option<&'static str>,
     pub store_reachable: bool,
     pub automation: bool,
+    pub accounts_loaded: bool,
     pub api_requires_access_jwt: bool,
     pub window: Option<WindowView>,
     pub accounts: Vec<AccountView>,
@@ -86,6 +89,7 @@ pub async fn snapshot(context: &AppContext) -> Snapshot {
             store: None,
             store_reachable: false,
             automation: false,
+            accounts_loaded: false,
             api_requires_access_jwt: false,
             window: None,
             accounts: Vec::new(),
@@ -105,6 +109,7 @@ pub async fn snapshot(context: &AppContext) -> Snapshot {
         store: Some(store.kind()),
         store_reachable: store.is_reachable().await,
         automation: running.engine.automation_available(),
+        accounts_loaded: running.engine.registry().is_loaded(),
         api_requires_access_jwt: running.api.require_access_jwt,
         window: Some(WindowView {
             label: running.window_label.clone(),
@@ -160,6 +165,12 @@ pub fn router(context: Context, console: &Path) -> Router {
         .route(&callback_route, get(public::dhan_callback))
         .route("/api/state", get(admin::state))
         .route("/api/stream", get(admin::stream))
+        .route("/api/accounts", post(accounts::add))
+        .route("/api/accounts/{alias}", delete(accounts::remove))
+        .route(
+            "/api/accounts/{alias}/token-seed",
+            post(accounts::rotate_seed),
+        )
         .route("/api/accounts/{alias}/login", post(admin::request_login))
         .route("/api/accounts/login", post(admin::request_login_all))
         .route("/api/telegram/test", post(admin::test_telegram))
@@ -197,3 +208,7 @@ pub async fn serve(context: Context, console: &Path, address: SocketAddr) -> any
 #[cfg(test)]
 #[path = "../../tests/unit/api.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../tests/unit/api_accounts.rs"]
+mod account_tests;

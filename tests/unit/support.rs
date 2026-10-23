@@ -1,7 +1,7 @@
 use axum::Router;
 use tokio::net::TcpListener;
 
-use crate::config::Account;
+use crate::accounts::Account;
 use crate::otp::decode_base32;
 
 pub const DHAN_SEED: &str = "JBSWY3DPEHPK3PXP";
@@ -29,7 +29,6 @@ pub fn account(alias: &str, client_id: &str) -> Account {
         pin: "123456".into(),
         dhan_totp_seed: decode_base32(DHAN_SEED).unwrap(),
         api_totp_seed: decode_base32(API_SEED).unwrap(),
-        api_seed_shared: false,
     }
 }
 
@@ -87,9 +86,12 @@ pub fn engine(
     store: crate::store::Store,
 ) -> std::sync::Arc<crate::login::LoginEngine> {
     use crate::login::{EngineParts, LoginEngine};
+    let registry = crate::accounts::Registry::default();
+    let live = crate::state::LiveState::new(&accounts);
+    registry.replace_all(accounts);
     LoginEngine::new(EngineParts {
-        live: crate::state::LiveState::new(&accounts),
-        accounts,
+        live,
+        accounts: registry,
         dhan: crate::dhan::api::DhanAuth::new(dhan_base).unwrap(),
         sidecar: sidecar_url
             .map(|url| crate::dhan::sidecar::Sidecar::with_code_lifetime(url, 0).unwrap()),
@@ -101,4 +103,97 @@ pub fn engine(
         notifier: crate::telegram::Notifier::disabled(),
         manual_timeout: std::time::Duration::from_secs(5),
     })
+}
+
+/// Signs Cloudflare Access style JWTs with the test-only key in
+/// `tests/fixtures/access_test_rsa.pk8`, and serves its public half as certs.
+pub struct AccessSigner {
+    key: ring::rsa::KeyPair,
+    pub kid: String,
+}
+
+pub const ACCESS_AUD: &str = "dashboard-aud";
+pub const ACCESS_API_AUD: &str = "api-aud";
+
+impl AccessSigner {
+    pub fn new(kid: &str) -> Self {
+        let der = include_bytes!("../fixtures/access_test_rsa.pk8");
+        Self {
+            key: ring::rsa::KeyPair::from_pkcs8(der).expect("the fixture key loads"),
+            kid: kid.to_owned(),
+        }
+    }
+
+    pub fn jwks(&self) -> serde_json::Value {
+        use base64::Engine;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let public: ring::rsa::PublicKeyComponents<Vec<u8>> = self.key.public().into();
+        serde_json::json!({ "keys": [{
+            "kid": self.kid, "kty": "RSA", "alg": "RS256", "use": "sig",
+            "n": URL_SAFE_NO_PAD.encode(&public.n), "e": URL_SAFE_NO_PAD.encode(&public.e),
+        }]})
+    }
+
+    pub fn sign_with(&self, header: &serde_json::Value, claims: &serde_json::Value) -> String {
+        use base64::Engine;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let input = format!(
+            "{}.{}",
+            URL_SAFE_NO_PAD.encode(header.to_string()),
+            URL_SAFE_NO_PAD.encode(claims.to_string())
+        );
+        let mut signature = vec![0; self.key.public().modulus_len()];
+        self.key
+            .sign(
+                &ring::signature::RSA_PKCS1_SHA256,
+                &ring::rand::SystemRandom::new(),
+                input.as_bytes(),
+                &mut signature,
+            )
+            .expect("signing works");
+        format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature))
+    }
+
+    pub fn sign(&self, claims: &serde_json::Value) -> String {
+        self.sign_with(
+            &serde_json::json!({ "alg": "RS256", "kid": self.kid, "typ": "JWT" }),
+            claims,
+        )
+    }
+
+    /// A person signed in through Access, valid for an hour from `now`.
+    pub fn person(&self, issuer: &str, audience: &str, email: &str, now: i64) -> String {
+        self.sign(&serde_json::json!({
+            "aud": [audience], "iss": issuer, "email": email, "type": "app",
+            "iat": now, "nbf": now, "exp": now + 3600, "sub": "user-1",
+        }))
+    }
+
+    /// A service token (a trading engine), valid for an hour from `now`.
+    pub fn service(&self, issuer: &str, audience: &str, now: i64) -> String {
+        self.sign(&serde_json::json!({
+            "aud": audience, "iss": issuer, "common_name": "engine.access", "type": "app",
+            "iat": now, "nbf": now, "exp": now + 3600, "sub": "",
+        }))
+    }
+}
+
+/// A team domain on a local port that serves the signer's certs, counting fetches.
+pub async fn access_team(
+    signer: &AccessSigner,
+) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use axum::routing::get;
+    let jwks = signer.jwks();
+    let fetches = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = std::sync::Arc::clone(&fetches);
+    let team = serve(Router::new().route(
+        "/cdn-cgi/access/certs",
+        get(move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let jwks = jwks.clone();
+            async move { axum::Json(jwks) }
+        }),
+    ))
+    .await;
+    (team, fetches)
 }

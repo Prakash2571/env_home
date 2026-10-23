@@ -11,14 +11,14 @@ use serde_json::{Value, json};
 
 use super::guard::{Attempt, Refusal};
 use super::{Context, Running};
+use crate::accounts::Account;
 use crate::clock::{describe, ist_iso, now_unix};
-use crate::config::Account;
 use crate::otp::{is_six_digits, now_seconds, seconds_remaining};
 use crate::state::{EventKind, client_id_hint};
 use crate::store::RequestRecord;
 use crate::telegram::{Notice, Topic};
 
-pub const ACCESS_JWT_HEADER: &str = "cf-access-jwt-assertion";
+pub const ACCESS_JWT_HEADER: &str = crate::access::JWT_HEADER;
 const MAX_CLIENT_ID: usize = 32;
 const NOT_READY_RETRY_SECONDS: i64 = 300;
 
@@ -129,11 +129,8 @@ pub async fn issue(
         .as_ref()
         .and_then(|request| request.client_id.clone())
         .unwrap_or_default();
-    let account = running
-        .engine
-        .accounts()
-        .iter()
-        .find(|account| account.client_id == client_id);
+    let account = running.engine.registry().by_client_id(&client_id);
+    let account = account.as_ref();
 
     let reply = decide(
         &context,
@@ -203,6 +200,26 @@ fn seconds_until(until: u64, fallback: i64) -> i64 {
     i64::try_from(until.saturating_sub(now_seconds())).unwrap_or(fallback)
 }
 
+/// With D4 on, the request must carry a JWT Cloudflare Access signed for the
+/// token API application; a service token produces one, nothing else can.
+async fn verify_service_token(running: &Running, headers: &HeaderMap) -> Result<(), &'static str> {
+    let Some(token) = headers
+        .get(ACCESS_JWT_HEADER)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return Err("no Cloudflare Access token");
+    };
+    let Some(check) = &running.api.access else {
+        return Err("Cloudflare Access verification is not configured");
+    };
+    check
+        .verifier
+        .verify(token, &check.audience, crate::clock::now_unix())
+        .await
+        .map(|_| ())
+        .map_err(crate::access::AccessError::reason)
+}
+
 async fn decide(
     context: &Context,
     running: &Running,
@@ -223,12 +240,10 @@ async fn decide(
         reply.outcome = Outcome::RateLimited;
         return reply;
     }
-    if running.api.require_access_jwt && headers.get(ACCESS_JWT_HEADER).is_none() {
-        return Reply::refused(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "no Cloudflare Access header",
-        );
+    if running.api.require_access_jwt
+        && let Err(reason) = verify_service_token(running, headers).await
+    {
+        return Reply::refused(StatusCode::UNAUTHORIZED, "unauthorized", reason);
     }
     let Some(request) = request else {
         return Reply::refused(
@@ -250,7 +265,6 @@ async fn decide(
         client_id,
         source,
         secret: account.map(|account| account.api_totp_seed.as_slice()),
-        shared_seed: account.is_some_and(|account| account.api_seed_shared),
         code,
         now: now_seconds(),
     };

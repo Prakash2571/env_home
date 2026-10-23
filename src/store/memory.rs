@@ -2,12 +2,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::Result;
 
-use super::{AttemptRecord, RequestRecord, StoredToken};
+use super::{AttemptRecord, RequestRecord, StoredAccount, StoredToken};
 
 const MAX_ROWS: usize = 5_000;
 
 #[derive(Default)]
 struct Tables {
+    accounts: Vec<StoredAccount>,
     tokens: Vec<StoredToken>,
     attempts: Vec<AttemptRecord>,
     requests: Vec<RequestRecord>,
@@ -49,6 +50,41 @@ impl MemoryStore {
             .filter(|token| token.alias == alias)
             .max_by_key(|token| token.obtained_at)
             .cloned()
+    }
+
+    /// In the order they were added, like the Postgres `id`.
+    pub fn list_accounts(&self) -> Vec<StoredAccount> {
+        self.tables().accounts.clone()
+    }
+
+    pub fn save_account(&self, account: &StoredAccount) -> Result<()> {
+        let mut tables = self.tables();
+        if let Some(existing) = tables
+            .accounts
+            .iter_mut()
+            .find(|existing| existing.alias == account.alias)
+        {
+            existing.sealed = account.sealed.clone();
+            existing.updated_at = account.updated_at;
+            return Ok(());
+        }
+        if tables
+            .accounts
+            .iter()
+            .any(|existing| existing.client_id == account.client_id)
+        {
+            anyhow::bail!("another account already uses that client ID");
+        }
+        tables.accounts.push(account.clone());
+        Ok(())
+    }
+
+    pub fn delete_account(&self, alias: &str) -> bool {
+        let mut tables = self.tables();
+        let before = tables.accounts.len();
+        tables.accounts.retain(|account| account.alias != alias);
+        tables.tokens.retain(|token| token.alias != alias);
+        tables.accounts.len() != before
     }
 
     pub fn record_attempt(&self, attempt: &AttemptRecord) -> Result<()> {

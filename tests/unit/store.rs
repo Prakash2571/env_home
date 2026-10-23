@@ -108,6 +108,79 @@ async fn honours_the_store_contract(store: Store, base: i64) {
     assert_eq!(requests[0].outcome, "served");
     assert_eq!(requests[0].ip.as_deref(), Some("203.0.113.7"));
     assert_eq!(store.recent_requests(1).await.unwrap().len(), 1);
+
+    honours_the_account_contract(&store, &alias, base).await;
+}
+
+fn stored_account(alias: &str, client_id: &str, at: i64) -> StoredAccount {
+    StoredAccount {
+        alias: alias.into(),
+        client_id: client_id.into(),
+        sealed: format!("v1.account.{at}"),
+        created_at: at,
+        updated_at: at,
+    }
+}
+
+async fn honours_the_account_contract(store: &Store, alias: &str, base: i64) {
+    let first = format!("{alias}a");
+    let second = format!("{alias}b");
+    let ours = |rows: Vec<StoredAccount>| -> Vec<StoredAccount> {
+        rows.into_iter()
+            .filter(|row| row.alias.starts_with(alias))
+            .collect()
+    };
+
+    store
+        .save_account(&stored_account(&second, &format!("{base}2"), base))
+        .await
+        .unwrap();
+    store
+        .save_account(&stored_account(&first, &format!("{base}1"), base))
+        .await
+        .unwrap();
+    let rows = ours(store.list_accounts().await.unwrap());
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.alias.as_str())
+            .collect::<Vec<_>>(),
+        [second.as_str(), first.as_str()],
+        "listed in the order they were added, not by name"
+    );
+
+    let mut resealed = stored_account(&second, &format!("{base}2"), base + 60);
+    resealed.sealed = "v1.account.new".into();
+    store.save_account(&resealed).await.unwrap();
+    let rows = ours(store.list_accounts().await.unwrap());
+    assert_eq!(rows[0].sealed, "v1.account.new");
+    assert_eq!(
+        rows[0].created_at, base,
+        "re-sealing keeps when it was added"
+    );
+    assert_eq!(rows[0].updated_at, base + 60);
+
+    assert!(
+        store
+            .save_account(&stored_account(
+                &format!("{alias}c"),
+                &format!("{base}1"),
+                base
+            ))
+            .await
+            .is_err(),
+        "two accounts may not share a client ID"
+    );
+
+    store.save_token(&token(&second, base)).await.unwrap();
+    assert!(store.delete_account(&second).await.unwrap());
+    assert_eq!(
+        store.latest_token(&second).await.unwrap(),
+        None,
+        "its tokens go too"
+    );
+    assert!(!store.delete_account(&second).await.unwrap());
+    assert!(store.delete_account(&first).await.unwrap());
+    assert!(ours(store.list_accounts().await.unwrap()).is_empty());
 }
 
 #[tokio::test]

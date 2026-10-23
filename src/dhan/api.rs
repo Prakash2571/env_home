@@ -9,7 +9,7 @@ use time::macros::format_description;
 use time::{OffsetDateTime, PrimitiveDateTime, UtcOffset};
 
 use super::{Session, is_valid_token};
-use crate::config::Account;
+use crate::accounts::Account;
 
 const HTTP_TIMEOUT_SECONDS: u64 = 20;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;

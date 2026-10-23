@@ -9,8 +9,8 @@ use tokio::sync::Mutex;
 
 pub use scheduler::{LoginRequest, Scheduler, SchedulerHandle};
 
+use crate::accounts::{Account, Registry};
 use crate::clock::{IST_OFFSET_SECONDS, describe, ist_day_number, now_unix};
-use crate::config::Account;
 use crate::dhan::Session;
 use crate::dhan::api::DhanAuth;
 use crate::dhan::callback::CallbackGate;
@@ -55,7 +55,7 @@ impl std::fmt::Display for LoginFailure {
 }
 
 pub struct EngineParts {
-    pub accounts: Vec<Account>,
+    pub accounts: Registry,
     pub dhan: DhanAuth,
     pub sidecar: Option<Sidecar>,
     pub gate: CallbackGate,
@@ -90,15 +90,16 @@ impl LoginEngine {
         })
     }
 
-    pub fn accounts(&self) -> &[Account] {
+    pub fn registry(&self) -> &Registry {
         &self.parts.accounts
     }
 
-    pub fn account(&self, alias: &str) -> Option<&Account> {
-        self.parts
-            .accounts
-            .iter()
-            .find(|account| account.alias == alias)
+    pub fn accounts(&self) -> Vec<Account> {
+        self.parts.accounts.list()
+    }
+
+    pub fn account(&self, alias: &str) -> Option<Account> {
+        self.parts.accounts.get(alias)
     }
 
     pub fn live(&self) -> &LiveState {
@@ -122,8 +123,8 @@ impl LoginEngine {
     }
 
     pub async fn refresh_token_views(&self) {
-        for account in &self.parts.accounts {
-            match self.parts.vault.latest(account).await {
+        for account in self.parts.accounts.list() {
+            match self.parts.vault.latest(&account).await {
                 Ok(token) => self.parts.live.update(&account.alias, |view| {
                     view.token = token.as_ref().map(token_view);
                     if token
@@ -144,7 +145,6 @@ impl LoginEngine {
     pub async fn login(&self, alias: &str, drive: Drive) -> Result<Session, LoginFailure> {
         let account = self
             .account(alias)
-            .cloned()
             .ok_or_else(|| fail(StageId::Consent, "no such account"))?;
         let _turn = self.turn.lock().await;
         let live = &self.parts.live;

@@ -11,7 +11,6 @@ fn attempt<'a>(client: &'a str, source: &'a str, code: &'a str, now: u64) -> Att
         client_id: client,
         source,
         secret: Some(SECRET),
-        shared_seed: false,
         code,
         now,
     }
@@ -131,33 +130,6 @@ fn guessing_from_many_sources_still_trips_the_per_client_budget() {
         guard.check_code(&attempt("1", ENGINE, &code_at(SECRET, NOW), NOW)),
         Err(Refusal::Locked { .. })
     ));
-}
-
-#[test]
-fn a_shared_seed_shares_one_guessing_budget_across_accounts() {
-    let guard = TokenGuard::default();
-    for index in 0..CLIENT_FAILURE_LIMIT {
-        let client = format!("client{index}");
-        let source = format!("203.0.113.{index}");
-        let _ = guard.check_code(&Attempt {
-            shared_seed: true,
-            ..attempt(&client, &source, "000000", NOW)
-        });
-    }
-    let fresh = Attempt {
-        shared_seed: true,
-        ..attempt("another", ENGINE, "123456", NOW)
-    };
-    assert!(matches!(
-        guard.check_code(&fresh),
-        Err(Refusal::Locked { .. })
-    ));
-    let own_code = code_at(SECRET, NOW);
-    let own_seed = attempt("another", ENGINE, &own_code, NOW);
-    assert!(
-        guard.check_code(&own_seed).is_ok(),
-        "an account with its own seed is not charged"
-    );
 }
 
 #[test]

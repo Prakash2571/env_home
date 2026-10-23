@@ -105,7 +105,7 @@ impl Scheduler {
             if spent >= MAX_WINDOW_ATTEMPTS || self.ledger.stopped.contains(&account.alias) {
                 continue;
             }
-            match self.engine.vault().obtained_today(account).await {
+            match self.engine.vault().obtained_today(&account).await {
                 Ok(true) => {}
                 Ok(false) => due.push(account.alias.clone()),
                 Err(error) => {
@@ -150,7 +150,7 @@ impl Scheduler {
             if self
                 .engine
                 .vault()
-                .obtained_today(account)
+                .obtained_today(&account)
                 .await
                 .unwrap_or(false)
             {
@@ -216,8 +216,8 @@ impl Scheduler {
             None => self
                 .engine
                 .accounts()
-                .iter()
-                .map(|account| account.alias.clone())
+                .into_iter()
+                .map(|account| account.alias)
                 .collect(),
         };
         let engine = Arc::clone(&self.engine);

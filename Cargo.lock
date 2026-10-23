@@ -169,6 +169,7 @@ dependencies = [
  "hmac 0.12.1",
  "http-body-util",
  "reqwest",
+ "ring",
  "serde",
  "serde_json",
  "sha1",

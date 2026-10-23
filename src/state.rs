@@ -4,8 +4,8 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::Serialize;
 use tokio::sync::watch;
 
+use crate::accounts::Account;
 use crate::clock::now_unix;
-use crate::config::Account;
 
 const MAX_EVENTS: usize = 200;
 
@@ -84,7 +84,6 @@ pub struct TokenView {
 pub struct AccountView {
     pub alias: String,
     pub client_id_hint: String,
-    pub api_seed: &'static str,
     pub phase: Phase,
     pub stages: Vec<StageView>,
     pub last_error: Option<String>,
@@ -136,6 +135,19 @@ fn idle_stages() -> Vec<StageView> {
         .collect()
 }
 
+fn fresh_view(account: &Account) -> AccountView {
+    AccountView {
+        alias: account.alias.clone(),
+        client_id_hint: client_id_hint(&account.client_id),
+        phase: Phase::Idle,
+        stages: idle_stages(),
+        last_error: None,
+        consent_url: None,
+        token: None,
+        last_served_at: None,
+    }
+}
+
 struct Inner {
     accounts: Vec<AccountView>,
     events: VecDeque<EventView>,
@@ -149,24 +161,7 @@ pub struct LiveState {
 
 impl LiveState {
     pub fn new(accounts: &[Account]) -> Self {
-        let views = accounts
-            .iter()
-            .map(|account| AccountView {
-                alias: account.alias.clone(),
-                client_id_hint: client_id_hint(&account.client_id),
-                api_seed: if account.api_seed_shared {
-                    "shared"
-                } else {
-                    "own"
-                },
-                phase: Phase::Idle,
-                stages: idle_stages(),
-                last_error: None,
-                consent_url: None,
-                token: None,
-                last_served_at: None,
-            })
-            .collect();
+        let views = accounts.iter().map(fresh_view).collect();
         let (revision, _) = watch::channel(0);
         Self {
             inner: Arc::new(RwLock::new(Inner {
@@ -207,6 +202,27 @@ impl LiveState {
             .iter()
             .find(|view| view.alias == alias)
             .cloned()
+    }
+
+    /// Shows a newly added (or newly loaded) account; one already shown stays.
+    pub fn add_account(&self, account: &Account) {
+        {
+            let mut inner = self.write();
+            if inner
+                .accounts
+                .iter()
+                .any(|view| view.alias == account.alias)
+            {
+                return;
+            }
+            inner.accounts.push(fresh_view(account));
+        }
+        self.changed();
+    }
+
+    pub fn remove_account(&self, alias: &str) {
+        self.write().accounts.retain(|view| view.alias != alias);
+        self.changed();
     }
 
     pub fn events(&self) -> Vec<EventView> {

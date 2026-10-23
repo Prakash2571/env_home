@@ -7,125 +7,19 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::*;
+use crate::access::JWT_HEADER;
+use crate::api_harness::*;
 use crate::config::{AdminPolicy, ApiPolicy};
-use crate::dhan::Session;
-use crate::login::Scheduler;
-use crate::otp::{code_at, now_seconds};
-use crate::store::{MemoryStore, Store};
-use crate::test_support::{account, engine, fake_dhan};
-
-const EMAIL: &str = "operator@example.in";
-const MONDAY_0900_IST: i64 = 1_792_348_200 + 9 * 3600;
-
-struct Harness {
-    router: Router,
-    engine: Arc<LoginEngine>,
-    store: Store,
-}
-
-async fn harness(api: ApiPolicy, admin: AdminPolicy, sidecar: Option<&str>) -> Harness {
-    let store = Store::Memory(MemoryStore::default());
-    let dhan = fake_dhan("1100000001").await;
-    let engine = engine(
-        vec![account("main", "1100000001")],
-        &dhan,
-        sidecar,
-        store.clone(),
-    );
-    let window = crate::clock::LoginWindow::parse("08:00-08:30", "mon-fri").unwrap();
-    let (scheduler, handle) = Scheduler::new(
-        Arc::clone(&engine),
-        window.clone(),
-        Arc::new(|| MONDAY_0900_IST),
-    );
-    tokio::spawn(scheduler.run());
-    let context = Arc::new(AppContext {
-        admin: admin.clone(),
-        running: Some(Running {
-            engine: Arc::clone(&engine),
-            scheduler: handle,
-            window_label: window.label(),
-            window,
-            api,
-            admin,
-            callback_route: "/dhan/callback".into(),
-        }),
-        problems: Vec::new(),
-        guard: guard::TokenGuard::default(),
-        started_at: 0,
-    });
-    Harness {
-        router: router(context, std::path::Path::new("/nonexistent")),
-        engine,
-        store,
-    }
-}
-
-fn open_api() -> ApiPolicy {
-    ApiPolicy {
-        require_access_jwt: false,
-        client_ip_header: Some("cf-connecting-ip".into()),
-    }
-}
-
-fn access_required() -> AdminPolicy {
-    AdminPolicy {
-        require_access_identity: true,
-        allowed_emails: Vec::new(),
-    }
-}
-
-async fn call(
-    router: &Router,
-    request: Request<Body>,
-) -> (StatusCode, axum::http::HeaderMap, Value) {
-    let response = router.clone().oneshot(request).await.unwrap();
-    let status = response.status();
-    let headers = response.headers().clone();
-    let bytes = response.into_body().collect().await.unwrap().to_bytes();
-    let body = serde_json::from_slice(&bytes)
-        .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into()));
-    (status, headers, body)
-}
-
-fn token_request(body: Value, ip: &str) -> Request<Body> {
-    Request::post("/api/v1/token")
-        .header("content-type", "application/json")
-        .header("cf-connecting-ip", ip)
-        .body(Body::from(body.to_string()))
-        .unwrap()
-}
-
-fn current_code() -> String {
-    code_at(&account("main", "1").api_totp_seed, now_seconds())
-}
-
-async fn seal_token(harness: &Harness) {
-    let now = crate::clock::now_unix();
-    let session = Session {
-        client_id: "1100000001".into(),
-        access_token: "eyJ.live".into(),
-        obtained_at: now,
-        expires_at: now + 72_000,
-    };
-    harness
-        .engine
-        .vault()
-        .seal(
-            harness.engine.account("main").unwrap(),
-            &session,
-            "scheduled",
-        )
-        .await
-        .unwrap();
-}
+use crate::test_support::{ACCESS_API_AUD, ACCESS_AUD, AccessSigner};
 
 #[tokio::test]
 async fn an_unconfigured_service_stays_up_and_says_what_is_missing() {
+    let access = TestAccess::start().await;
+    let (admin, _) = access.arm(access_required(), open_api());
     let context = Arc::new(crate::app::unconfigured(
-        vec!["CBL_ACCOUNTS names no account".into()],
+        vec!["CBL_ENCRYPTION_KEY is missing".into()],
         7,
-        access_required(),
+        admin,
     ));
     let router = router(context, std::path::Path::new("/nonexistent"));
     let (status, headers, body) = call(
@@ -160,13 +54,13 @@ async fn an_unconfigured_service_stays_up_and_says_what_is_missing() {
     let (_, _, state) = call(
         &router,
         Request::get("/api/state")
-            .header("cf-access-authenticated-user-email", EMAIL)
+            .header(JWT_HEADER, access.person(EMAIL))
             .body(Body::empty())
             .unwrap(),
     )
     .await;
     assert_eq!(state["configured"], false);
-    assert_eq!(state["problems"][0], "CBL_ACCOUNTS names no account");
+    assert_eq!(state["problems"][0], "CBL_ENCRYPTION_KEY is missing");
 
     let (status, _, _) = call(&router, token_request(json!({}), "203.0.113.1")).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
@@ -197,7 +91,7 @@ async fn the_dashboard_state_needs_the_access_identity_and_respects_the_allowlis
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     let request = Request::get("/api/state")
-        .header("cf-access-authenticated-user-email", EMAIL)
+        .header(JWT_HEADER, harness.signed())
         .body(Body::empty())
         .unwrap();
     let (status, headers, state) = call(&harness.router, request).await;
@@ -214,7 +108,7 @@ async fn the_dashboard_state_needs_the_access_identity_and_respects_the_allowlis
 
     let listed = harness_with_allowlist(vec!["someone@else.in".into()]).await;
     let request = Request::get("/api/state")
-        .header("cf-access-authenticated-user-email", EMAIL)
+        .header(JWT_HEADER, listed.signed())
         .body(Body::empty())
         .unwrap();
     assert_eq!(call(&listed.router, request).await.0, StatusCode::FORBIDDEN);
@@ -226,6 +120,7 @@ async fn harness_with_allowlist(emails: Vec<String>) -> Harness {
         AdminPolicy {
             require_access_identity: true,
             allowed_emails: emails,
+            access: None,
         },
         None,
     )
@@ -410,6 +305,7 @@ async fn one_ip_is_rate_limited_and_the_access_service_token_can_be_required() {
         ApiPolicy {
             require_access_jwt: true,
             client_ip_header: None,
+            access: None,
         },
         access_required(),
         None,
@@ -425,10 +321,97 @@ async fn one_ip_is_rate_limited_and_the_access_service_token_can_be_required() {
         StatusCode::UNAUTHORIZED,
         "D4: with the flag on, no Access JWT means no token"
     );
+
+    let with = |token: String| {
+        Request::post("/api/v1/token")
+            .header("content-type", "application/json")
+            .header(JWT_HEADER, token)
+            .body(Body::from(
+                json!({"client_id": "1100000001", "totp": current_code()}).to_string(),
+            ))
+            .unwrap()
+    };
+    let (status, _, body) = call(&strict.router, with(strict.access.person(EMAIL))).await;
+    assert_eq!(
+        (status, body["error"].as_str()),
+        (StatusCode::UNAUTHORIZED, Some("unauthorized")),
+        "a dashboard sign-in is not a service token for the API"
+    );
+    let (status, _, body) = call(&strict.router, with(strict.access.engine())).await;
+    assert_eq!(
+        (status, body["error"].as_str()),
+        (StatusCode::SERVICE_UNAVAILABLE, Some("no_token_yet")),
+        "a verified service token reaches the TOTP check"
+    );
 }
 
-fn login_request(path: &str, body: Value, json_type: bool) -> Request<Body> {
-    let builder = Request::post(path).header("cf-access-authenticated-user-email", EMAIL);
+#[tokio::test]
+async fn the_dashboard_trusts_only_a_jwt_signed_for_its_own_application() {
+    let harness = harness(open_api(), access_required(), None).await;
+    let state = |token: Option<String>, forged_email: bool| {
+        let mut builder = Request::get("/api/state");
+        if forged_email {
+            builder = builder.header("cf-access-authenticated-user-email", EMAIL);
+        }
+        if let Some(token) = token {
+            builder = builder.header(JWT_HEADER, token);
+        }
+        builder.body(Body::empty()).unwrap()
+    };
+    let now = crate::clock::now_unix();
+    let access = &harness.access;
+    let cases = [
+        (
+            state(None, true),
+            StatusCode::UNAUTHORIZED,
+            "a forged email header alone",
+        ),
+        (
+            state(Some("junk".into()), true),
+            StatusCode::UNAUTHORIZED,
+            "a junk token",
+        ),
+        (
+            state(
+                Some(
+                    access
+                        .signer
+                        .person(&access.team, ACCESS_API_AUD, EMAIL, now),
+                ),
+                false,
+            ),
+            StatusCode::UNAUTHORIZED,
+            "a sign-in for another application",
+        ),
+        (
+            state(
+                Some(AccessSigner::new("other-key").person(&access.team, ACCESS_AUD, EMAIL, now)),
+                false,
+            ),
+            StatusCode::UNAUTHORIZED,
+            "a token from a key the team never published",
+        ),
+        (
+            state(
+                Some(access.signer.service(&access.team, ACCESS_AUD, now)),
+                false,
+            ),
+            StatusCode::FORBIDDEN,
+            "a service token is not a person",
+        ),
+        (
+            state(Some(harness.signed()), false),
+            StatusCode::OK,
+            "the operator",
+        ),
+    ];
+    for (request, expected, case) in cases {
+        assert_eq!(call(&harness.router, request).await.0, expected, "{case}");
+    }
+}
+
+fn login_request(token: &str, path: &str, body: Value, json_type: bool) -> Request<Body> {
+    let builder = Request::post(path).header(JWT_HEADER, token);
     let builder = if json_type {
         builder.header("content-type", "application/json")
     } else {
@@ -445,6 +428,7 @@ async fn dashboard_logins_are_queued_and_validated() {
         call(
             router,
             login_request(
+                &harness.signed(),
                 "/api/accounts/main/login",
                 json!({"drive": "manual"}),
                 false
@@ -458,6 +442,7 @@ async fn dashboard_logins_are_queued_and_validated() {
         call(
             router,
             login_request(
+                &harness.signed(),
                 "/api/accounts/ghost/login",
                 json!({"drive": "manual"}),
                 true
@@ -471,6 +456,7 @@ async fn dashboard_logins_are_queued_and_validated() {
         call(
             router,
             login_request(
+                &harness.signed(),
                 "/api/accounts/main/login",
                 json!({"drive": "scheduled"}),
                 true
@@ -484,6 +470,7 @@ async fn dashboard_logins_are_queued_and_validated() {
         call(
             router,
             login_request(
+                &harness.signed(),
                 "/api/accounts/main/login",
                 json!({"drive": "automated"}),
                 true
@@ -496,7 +483,12 @@ async fn dashboard_logins_are_queued_and_validated() {
     assert_eq!(
         call(
             router,
-            login_request("/api/accounts/login", json!({"nope": 1}), true)
+            login_request(
+                &harness.signed(),
+                "/api/accounts/login",
+                json!({"nope": 1}),
+                true
+            )
         )
         .await
         .0,
@@ -505,7 +497,12 @@ async fn dashboard_logins_are_queued_and_validated() {
 
     let (status, _, body) = call(
         router,
-        login_request("/api/accounts/main/login", json!({"drive": "manual"}), true),
+        login_request(
+            &harness.signed(),
+            "/api/accounts/main/login",
+            json!({"drive": "manual"}),
+            true,
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::ACCEPTED);
@@ -530,7 +527,7 @@ async fn dashboard_logins_are_queued_and_validated() {
         if harness
             .engine
             .vault()
-            .latest(harness.engine.account("main").unwrap())
+            .latest(&harness.engine.account("main").unwrap())
             .await
             .unwrap()
             .is_some()
@@ -543,7 +540,7 @@ async fn dashboard_logins_are_queued_and_validated() {
         harness
             .engine
             .vault()
-            .latest(harness.engine.account("main").unwrap())
+            .latest(&harness.engine.account("main").unwrap())
             .await
             .unwrap()
             .is_some()
@@ -559,15 +556,23 @@ async fn dashboard_logins_are_queued_and_validated() {
     assert_eq!(status, StatusCode::GONE);
     let (status, _, body) = call(
         router,
-        login_request("/api/accounts/login", json!({"drive": "manual"}), true),
+        login_request(
+            &harness.signed(),
+            "/api/accounts/login",
+            json!({"drive": "manual"}),
+            true,
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(body["queued"], "every account");
     assert_eq!(
-        call(router, login_request("/api/telegram/test", json!({}), true))
-            .await
-            .0,
+        call(
+            router,
+            login_request(&harness.signed(), "/api/telegram/test", json!({}), true)
+        )
+        .await
+        .0,
         StatusCode::CONFLICT
     );
 }
@@ -579,6 +584,7 @@ async fn the_stream_opens_with_a_snapshot_event() {
         AdminPolicy {
             require_access_identity: false,
             allowed_emails: Vec::new(),
+            access: None,
         },
         None,
     )
@@ -631,7 +637,7 @@ async fn the_audit_trail_on_the_dashboard_hides_whole_client_ids_too() {
     )
     .await;
     let request = Request::get("/api/state")
-        .header("cf-access-authenticated-user-email", EMAIL)
+        .header(JWT_HEADER, harness.signed())
         .body(Body::empty())
         .unwrap();
     let (_, _, state) = call(&harness.router, request).await;

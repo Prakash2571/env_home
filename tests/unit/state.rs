@@ -16,7 +16,6 @@ fn every_account_starts_idle_with_the_full_stage_chain_and_no_secrets() {
         view.client_id_hint, "••••0001",
         "the view never carries the whole client ID"
     );
-    assert_eq!(view.api_seed, "own");
     assert!(state.account("missing").is_none());
 }
 
@@ -85,4 +84,18 @@ async fn every_change_bumps_the_revision_the_stream_waits_on() {
 fn short_client_ids_are_hinted_without_panicking() {
     assert_eq!(client_id_hint("12"), "••••12");
     assert_eq!(client_id_hint(""), "••••");
+}
+
+#[test]
+fn accounts_can_join_and_leave_the_dashboard_while_it_runs() {
+    let state = LiveState::new(&[]);
+    let mut changes = state.subscribe();
+    state.add_account(&account("main", "1100000001"));
+    state.add_account(&account("main", "1100000001"));
+    assert_eq!(state.accounts().len(), 1, "adding twice shows it once");
+    assert!(changes.has_changed().unwrap());
+    changes.mark_unchanged();
+    state.remove_account("main");
+    assert!(state.accounts().is_empty());
+    assert!(changes.has_changed().unwrap());
 }

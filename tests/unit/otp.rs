@@ -92,3 +92,31 @@ fn six_digit_check_refuses_anything_else() {
 fn now_is_after_2026() {
     assert!(now_seconds() > 1_767_225_600);
 }
+
+#[test]
+fn base32_encoding_round_trips_and_matches_rfc_4648() {
+    assert_eq!(encode_base32(b"foobar"), "MZXW6YTBOI");
+    assert_eq!(encode_base32(b"f"), "MY");
+    for length in 1..=40 {
+        let bytes: Vec<u8> = (0..length).map(|index| (index * 37 + 11) as u8).collect();
+        assert_eq!(decode_base32(&encode_base32(&bytes)).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn a_generated_seed_is_160_bits_base32_and_never_repeats() {
+    let first = generate_seed();
+    let second = generate_seed();
+    assert_eq!(first.len(), SEED_BYTES);
+    assert_ne!(first, second, "two seeds from the OS RNG never match");
+    assert_eq!(encode_base32(&first).len(), 32);
+}
+
+#[test]
+fn the_otpauth_uri_names_the_account_and_carries_the_seed() {
+    let uri = otpauth_uri("main", b"foobar");
+    assert_eq!(
+        uri,
+        "otpauth://totp/BrokerLogin:main?secret=MZXW6YTBOI&issuer=BrokerLogin&algorithm=SHA1&digits=6&period=30"
+    );
+}

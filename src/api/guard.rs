@@ -30,7 +30,6 @@ pub struct Attempt<'request> {
     pub client_id: &'request str,
     pub source: &'request str,
     pub secret: Option<&'request [u8]>,
-    pub shared_seed: bool,
     pub code: &'request str,
     pub now: u64,
 }
@@ -140,8 +139,6 @@ impl Default for TokenGuard {
     }
 }
 
-const SHARED_SEED_KEY: &str = "<shared token API seed>";
-
 impl TokenGuard {
     fn ledger(&self) -> MutexGuard<'_, Ledger> {
         self.ledger
@@ -155,10 +152,7 @@ impl TokenGuard {
         }
         let now = attempt.now;
         let source = (attempt.client_id.to_owned(), source_key(attempt.source));
-        let mut budgets = vec![attempt.client_id.to_owned()];
-        if attempt.shared_seed {
-            budgets.push(SHARED_SEED_KEY.to_owned());
-        }
+        let budgets = [attempt.client_id.to_owned()];
 
         let mut ledger = self.ledger();
         let ledger = &mut *ledger;

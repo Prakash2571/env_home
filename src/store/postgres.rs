@@ -5,7 +5,7 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tokio_postgres::{Client, NoTls, Row};
 
-use super::{AttemptRecord, MIGRATIONS, RequestRecord, StoredToken};
+use super::{AttemptRecord, MIGRATIONS, RequestRecord, StoredAccount, StoredToken};
 
 #[derive(Clone)]
 pub struct PgStore {
@@ -95,6 +95,66 @@ impl PgStore {
             expires_at: unix(&row, "expires_at"),
             drive: row.get("drive"),
         }))
+    }
+
+    pub async fn list_accounts(&self) -> Result<Vec<StoredAccount>> {
+        let rows = self
+            .client()
+            .await?
+            .query(
+                "SELECT alias, client_id, sealed_secrets, created_at, updated_at FROM broker_accounts \
+                 ORDER BY id",
+                &[],
+            )
+            .await
+            .context("could not read the accounts")?;
+        Ok(rows
+            .iter()
+            .map(|row| StoredAccount {
+                alias: row.get("alias"),
+                client_id: row.get("client_id"),
+                sealed: row.get("sealed_secrets"),
+                created_at: unix(row, "created_at"),
+                updated_at: unix(row, "updated_at"),
+            })
+            .collect())
+    }
+
+    pub async fn save_account(&self, account: &StoredAccount) -> Result<()> {
+        self.client()
+            .await?
+            .execute(
+                "INSERT INTO broker_accounts (alias, client_id, sealed_secrets, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5) \
+                 ON CONFLICT (alias) DO UPDATE SET sealed_secrets = EXCLUDED.sealed_secrets, \
+                 updated_at = EXCLUDED.updated_at",
+                &[
+                    &account.alias,
+                    &account.client_id,
+                    &account.sealed,
+                    &moment(account.created_at)?,
+                    &moment(account.updated_at)?,
+                ],
+            )
+            .await
+            .context("could not store the account")?;
+        Ok(())
+    }
+
+    /// One statement, so the account and its tokens go together or not at all.
+    pub async fn delete_account(&self, alias: &str) -> Result<bool> {
+        let row = self
+            .client()
+            .await?
+            .query_one(
+                "WITH gone AS (DELETE FROM broker_accounts WHERE alias = $1 RETURNING alias), \
+                 tokens AS (DELETE FROM broker_tokens WHERE alias = $1) \
+                 SELECT count(*) AS removed FROM gone",
+                &[&alias],
+            )
+            .await
+            .context("could not remove the account")?;
+        Ok(row.get::<_, i64>("removed") > 0)
     }
 
     pub async fn record_attempt(&self, attempt: &AttemptRecord) -> Result<()> {

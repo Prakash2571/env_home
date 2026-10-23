@@ -3,25 +3,21 @@ use std::collections::HashMap;
 use super::*;
 
 pub const KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-pub const DHAN_SEED: &str = "JBSWY3DPEHPK3PXP";
-pub const API_SEED: &str = "GEZDGNBVGY3TQOJQ";
 
 fn complete() -> HashMap<String, String> {
     [
         ("CBL_ENCRYPTION_KEY", KEY),
         ("POSTGRES_PASSWORD", "pw"),
-        ("CBL_ACCOUNTS", "Main"),
+        (
+            "CBL_ACCESS_TEAM_DOMAIN",
+            "https://team.cloudflareaccess.com/",
+        ),
+        ("CBL_ACCESS_DASHBOARD_AUD", "dashboard-aud"),
+        ("CBL_ACCESS_API_AUD", "api-aud"),
         (
             "DHAN_REDIRECT_URL",
             "https://login.example.in/dhan/callback",
         ),
-        ("DHAN_MAIN_CLIENT_ID", "1100000001"),
-        ("DHAN_MAIN_API_KEY", "key"),
-        ("DHAN_MAIN_API_SECRET", "secret"),
-        ("DHAN_MAIN_ACCOUNT_ID", "9999999999"),
-        ("DHAN_MAIN_ACCOUNT_PIN", "123456"),
-        ("DHAN_MAIN_TOTP_SECRET", DHAN_SEED),
-        ("TOKEN_API_MAIN_TOTP_SECRET", API_SEED),
     ]
     .into_iter()
     .map(|(key, value)| (key.to_owned(), value.to_owned()))
@@ -40,10 +36,6 @@ fn problems(env: &HashMap<String, String>) -> Vec<String> {
 fn a_complete_environment_loads_with_safe_defaults() {
     let config = load_from(&complete()).unwrap();
     assert_eq!(config.http_addr.to_string(), DEFAULT_HTTP_ADDR);
-    assert_eq!(config.accounts.len(), 1);
-    let account = &config.accounts[0];
-    assert_eq!(account.alias, "main", "aliases are case-folded");
-    assert!(!account.api_seed_shared);
     assert_eq!(config.window.label(), "08:00-08:30 IST");
     assert!(config.telegram.is_none(), "Telegram is optional");
     assert!(
@@ -69,7 +61,6 @@ fn every_problem_is_reported_at_once_by_name_and_never_by_value() {
     let found = problems(&env);
     assert!(found.iter().any(|p| p.contains("CBL_ENCRYPTION_KEY")));
     assert!(found.iter().any(|p| p.contains("POSTGRES_PASSWORD")));
-    assert!(found.iter().any(|p| p.contains("CBL_ACCOUNTS")));
     assert!(found.iter().any(|p| p.contains("DHAN_REDIRECT_URL")));
 
     let mut leaky = complete();
@@ -86,77 +77,60 @@ fn every_problem_is_reported_at_once_by_name_and_never_by_value() {
 }
 
 #[test]
-fn a_shared_api_seed_serves_accounts_without_their_own() {
-    let mut env = complete();
-    env.remove("TOKEN_API_MAIN_TOTP_SECRET");
-    env.insert("TOKEN_API_TOTP_SECRET".into(), API_SEED.into());
-    let config = load_from(&env).unwrap();
-    assert!(
-        config.accounts[0].api_seed_shared,
-        "D3 stays open: one shared seed works too"
-    );
+fn accounts_come_from_the_dashboard_and_old_account_variables_are_named() {
+    let config = load_from(&complete()).unwrap();
+    assert!(format!("{config:?}").contains("Config"));
+    assert!(retired_variables(&|_| None).is_empty());
 
-    env.remove("TOKEN_API_TOTP_SECRET");
+    let mut env = complete();
+    env.insert("CBL_ACCOUNTS".into(), "main".into());
+    env.insert("TOKEN_API_TOTP_SECRET".into(), "GEZDGNBVGY3TQOJQ".into());
+    env.insert("DHAN_MAIN_API_KEY".into(), "".into());
+    assert!(load_from(&env).is_ok(), "they no longer stop the service");
+    assert_eq!(
+        retired_variables(&|name| env.get(name).cloned()),
+        ["CBL_ACCOUNTS", "TOKEN_API_TOTP_SECRET"]
+    );
+}
+
+#[test]
+fn each_access_check_needs_the_team_and_its_own_aud_tag() {
+    let config = load_from(&complete()).unwrap();
+    let dashboard = config.admin.access.expect("the dashboard check is built");
+    assert_eq!(dashboard.audience, "dashboard-aud");
+    assert!(format!("{:?}", dashboard.verifier).contains("https://team.cloudflareaccess.com"));
+    assert_eq!(config.api.access.unwrap().audience, "api-aud");
+
+    let mut env = complete();
+    env.remove("CBL_ACCESS_DASHBOARD_AUD");
     assert!(
         problems(&env)
             .iter()
-            .any(|p| p.contains("TOKEN_API_MAIN_TOTP_SECRET"))
+            .any(|p| p.contains("CBL_ACCESS_DASHBOARD_AUD"))
     );
-}
+    env.insert("CBL_ADMIN_REQUIRE_ACCESS".into(), "false".into());
+    assert!(
+        load_from(&env).is_ok(),
+        "local development may turn the check off"
+    );
 
-#[test]
-fn the_api_seed_may_never_equal_the_broker_seed() {
     let mut env = complete();
-    env.insert("TOKEN_API_MAIN_TOTP_SECRET".into(), DHAN_SEED.into());
+    env.remove("CBL_ACCESS_API_AUD");
+    assert!(load_from(&env).is_ok(), "D4 off: the API needs no AUD tag");
+    env.insert("CBL_API_REQUIRE_ACCESS_JWT".into(), "true".into());
     assert!(
         problems(&env)
             .iter()
-            .any(|p| p.contains("must not log in to Dhan"))
+            .any(|p| p.contains("CBL_ACCESS_API_AUD"))
     );
-}
 
-#[test]
-fn aliases_must_be_simple_and_unique_and_client_ids_distinct() {
     let mut env = complete();
-    env.insert("CBL_ACCOUNTS".into(), "main,main".into());
-    assert!(problems(&env).iter().any(|p| p.contains("twice")));
-
-    env.insert("CBL_ACCOUNTS".into(), "ma-in".into());
-    assert!(problems(&env).iter().any(|p| p.contains("letters, digits")));
-
-    let mut two = complete();
-    two.insert("CBL_ACCOUNTS".into(), "main,alt".into());
-    for (key, value) in complete() {
-        if let Some(rest) = key.strip_prefix("DHAN_MAIN_") {
-            two.insert(format!("DHAN_ALT_{rest}"), value);
-        }
-    }
-    two.insert("TOKEN_API_ALT_TOTP_SECRET".into(), API_SEED.into());
-    assert!(
-        problems(&two)
-            .iter()
-            .any(|p| p.contains("share the client ID"))
+    env.insert(
+        "CBL_ACCESS_TEAM_DOMAIN".into(),
+        "http://team.cloudflareaccess.com".into(),
     );
-    two.insert("DHAN_ALT_CLIENT_ID".into(), "1100000002".into());
-    assert_eq!(load_from(&two).unwrap().accounts.len(), 2);
-}
-
-#[test]
-fn seeds_and_credentials_are_validated() {
-    let mut env = complete();
-    env.insert("DHAN_MAIN_TOTP_SECRET".into(), "not base32!".into());
-    env.insert("DHAN_MAIN_API_KEY".into(), "has space".into());
     let found = problems(&env);
-    assert!(
-        found
-            .iter()
-            .any(|p| p.contains("DHAN_MAIN_TOTP_SECRET is not a base32"))
-    );
-    assert!(
-        found
-            .iter()
-            .any(|p| p.contains("DHAN_MAIN_API_KEY must be printable"))
-    );
+    assert!(found.iter().any(|p| p.contains("https://")), "{found:?}");
 }
 
 #[test]
@@ -224,21 +198,12 @@ fn basics_fall_back_when_unset() {
 fn debug_output_never_carries_a_secret() {
     let config = load_from(&complete()).unwrap();
     let printed = format!("{config:?}");
-    for secret in [
-        KEY,
-        "pw",
-        "secret",
-        "123456",
-        DHAN_SEED,
-        "1100000001",
-        "9999999999",
-    ] {
+    for secret in [KEY, "password=pw"] {
         assert!(
             !printed.contains(secret),
             "{secret} leaked into Debug output: {printed}"
         );
     }
-    assert!(printed.contains("main") && printed.contains("••••0001"));
     let session = crate::dhan::Session {
         client_id: "1100000001".into(),
         access_token: "eyJ.secret".into(),

@@ -12,12 +12,13 @@ use serde_json::json;
 use tokio_stream::wrappers::WatchStream;
 
 use super::{Context, Running, snapshot};
+use crate::access::JWT_HEADER;
+use crate::clock::now_unix;
 use crate::config::AdminPolicy;
 use crate::login::{Drive, LoginRequest};
 use crate::state::EventKind;
 use crate::telegram::{Notice, Topic};
 
-pub const IDENTITY_HEADER: &str = "cf-access-authenticated-user-email";
 const STREAM_KEEPALIVE: Duration = Duration::from_secs(15);
 
 fn refuse(status: StatusCode, message: &str) -> Response {
@@ -37,19 +38,46 @@ impl IntoResponse for Denied {
     }
 }
 
-pub fn identity(headers: &HeaderMap, policy: &AdminPolicy) -> Result<Option<String>, Denied> {
-    let email = headers
-        .get(IDENTITY_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty());
+/// Who is using the dashboard, from the JWT Cloudflare Access signed. The
+/// plain email header Access also sends is never trusted: any process on the
+/// box could set it.
+pub async fn identity(headers: &HeaderMap, policy: &AdminPolicy) -> Result<Option<String>, Denied> {
     if !policy.require_access_identity {
-        return Ok(email);
+        return Ok(None);
     }
-    let Some(email) = email else {
+    let Some(check) = &policy.access else {
+        return Err(Denied(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Cloudflare Access verification is not configured",
+        ));
+    };
+    let Some(token) = headers
+        .get(JWT_HEADER)
+        .and_then(|value| value.to_str().ok())
+    else {
         return Err(Denied(
             StatusCode::UNAUTHORIZED,
             "sign in through Cloudflare Access",
+        ));
+    };
+    let signed_in = match check
+        .verifier
+        .verify(token, &check.audience, now_unix())
+        .await
+    {
+        Ok(signed_in) => signed_in,
+        Err(error) => {
+            tracing::info!(reason = error.reason(), "a dashboard request was refused");
+            return Err(Denied(
+                StatusCode::UNAUTHORIZED,
+                "sign in through Cloudflare Access",
+            ));
+        }
+    };
+    let Some(email) = signed_in.email else {
+        return Err(Denied(
+            StatusCode::FORBIDDEN,
+            "only a signed-in person may use the dashboard",
         ));
     };
     if !policy.allowed_emails.is_empty() && !policy.allowed_emails.contains(&email) {
@@ -68,7 +96,7 @@ fn is_json(headers: &HeaderMap) -> bool {
         .is_some_and(|value| value.to_ascii_lowercase().starts_with("application/json"))
 }
 
-fn admin<'context>(
+pub(super) async fn admin<'context>(
     context: &'context Context,
     headers: &HeaderMap,
     mutating: bool,
@@ -79,7 +107,7 @@ fn admin<'context>(
             "the service is not configured",
         ));
     };
-    let who = identity(headers, &running.admin)?;
+    let who = identity(headers, &running.admin).await?;
     if mutating && !is_json(headers) {
         return Err(Denied(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -94,7 +122,7 @@ pub async fn state(State(context): State<Context>, headers: HeaderMap) -> Respon
         .running
         .as_ref()
         .map_or(&context.admin, |running| &running.admin);
-    if let Err(refusal) = identity(&headers, policy) {
+    if let Err(refusal) = identity(&headers, policy).await {
         return refusal.into_response();
     }
     (
@@ -128,7 +156,7 @@ pub async fn stream(State(context): State<Context>, headers: HeaderMap) -> Respo
         .running
         .as_ref()
         .map_or(&context.admin, |running| &running.admin);
-    if let Err(refusal) = identity(&headers, policy) {
+    if let Err(refusal) = identity(&headers, policy).await {
         return refusal.into_response();
     }
     let sse = Sse::new(events(context)).keep_alive(KeepAlive::new().interval(STREAM_KEEPALIVE));
@@ -191,7 +219,7 @@ pub async fn request_login(
     headers: HeaderMap,
     body: Option<Json<LoginBody>>,
 ) -> Response {
-    let (running, who) = match admin(&context, &headers, true) {
+    let (running, who) = match admin(&context, &headers, true).await {
         Ok(found) => found,
         Err(refusal) => return refusal.into_response(),
     };
@@ -212,7 +240,7 @@ pub async fn request_login_all(
     headers: HeaderMap,
     body: Option<Json<LoginBody>>,
 ) -> Response {
-    let (running, who) = match admin(&context, &headers, true) {
+    let (running, who) = match admin(&context, &headers, true).await {
         Ok(found) => found,
         Err(refusal) => return refusal.into_response(),
     };
@@ -226,7 +254,7 @@ pub async fn request_login_all(
 }
 
 pub async fn test_telegram(State(context): State<Context>, headers: HeaderMap) -> Response {
-    let (running, who) = match admin(&context, &headers, true) {
+    let (running, who) = match admin(&context, &headers, true).await {
         Ok(found) => found,
         Err(refusal) => return refusal.into_response(),
     };

@@ -10,7 +10,10 @@ pub use postgres::PgStore;
 pub const KEEP_HISTORY_SECONDS: i64 = 90 * 86_400;
 pub const KEEP_TOKENS_SECONDS: i64 = 30 * 86_400;
 
-pub const MIGRATIONS: [(i32, &str); 1] = [(1, include_str!("../../migrations/0001_init.sql"))];
+pub const MIGRATIONS: [(i32, &str); 2] = [
+    (1, include_str!("../../migrations/0001_init.sql")),
+    (2, include_str!("../../migrations/0002_accounts.sql")),
+];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StoredToken {
@@ -20,6 +23,16 @@ pub struct StoredToken {
     pub obtained_at: i64,
     pub expires_at: i64,
     pub drive: String,
+}
+
+/// An account's sealed secrets. The store lists them in the order they were added.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StoredAccount {
+    pub alias: String,
+    pub client_id: String,
+    pub sealed: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -62,6 +75,29 @@ impl Store {
         match self {
             Self::Memory(store) => Ok(store.latest_token(alias)),
             Self::Postgres(store) => store.latest_token(alias).await,
+        }
+    }
+
+    pub async fn list_accounts(&self) -> Result<Vec<StoredAccount>> {
+        match self {
+            Self::Memory(store) => Ok(store.list_accounts()),
+            Self::Postgres(store) => store.list_accounts().await,
+        }
+    }
+
+    /// Inserts the account, or replaces its sealed secrets keeping `created_at`.
+    pub async fn save_account(&self, account: &StoredAccount) -> Result<()> {
+        match self {
+            Self::Memory(store) => store.save_account(account),
+            Self::Postgres(store) => store.save_account(account).await,
+        }
+    }
+
+    /// Removes the account and every token stored for it; its history stays.
+    pub async fn delete_account(&self, alias: &str) -> Result<bool> {
+        match self {
+            Self::Memory(store) => Ok(store.delete_account(alias)),
+            Self::Postgres(store) => store.delete_account(alias).await,
         }
     }
 

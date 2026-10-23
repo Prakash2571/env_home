@@ -2,7 +2,7 @@ use super::*;
 use crate::clock::LoginWindow;
 use crate::config::{AdminPolicy, ApiPolicy, TelegramConfig};
 use crate::dhan::callback::parse_redirect;
-use crate::test_support::{KEY, account, fake_dhan, serve};
+use crate::test_support::{KEY, fake_dhan, serve};
 
 async fn config(telegram: Option<TelegramConfig>) -> Config {
     Config {
@@ -10,7 +10,6 @@ async fn config(telegram: Option<TelegramConfig>) -> Config {
         home: ".".into(),
         store: StoreConfig::Memory,
         encryption_key: KEY.into(),
-        accounts: vec![account("main", "1100000001")],
         redirect_url: parse_redirect("https://login.example.in/dhan/callback/").unwrap(),
         sidecar_url: Some("http://127.0.0.1:1/login".into()),
         dhan_auth_base: fake_dhan("1100000001").await,
@@ -19,10 +18,12 @@ async fn config(telegram: Option<TelegramConfig>) -> Config {
         api: ApiPolicy {
             require_access_jwt: false,
             client_ip_header: None,
+            access: None,
         },
         admin: AdminPolicy {
             require_access_identity: true,
             allowed_emails: Vec::new(),
+            access: None,
         },
     }
 }
@@ -51,7 +52,7 @@ async fn a_complete_config_builds_a_running_service_and_announces_it() {
             .live()
             .events()
             .iter()
-            .any(|event| event.message.contains("service started with main"))
+            .any(|event| event.message == "service started")
     );
     for _ in 0..100 {
         if running.engine.notifier().view().delivered > 0 {
@@ -87,6 +88,7 @@ fn an_unconfigured_context_carries_only_the_problems() {
         AdminPolicy {
             require_access_identity: true,
             allowed_emails: Vec::new(),
+            access: None,
         },
     );
     assert!(context.running.is_none());

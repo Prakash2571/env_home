@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow, bail};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::config::Account;
+use crate::accounts::Account;
 use crate::otp::{STEP_SECONDS, code_at, now_seconds, step_of};
 
 const REPLY_TIMEOUT_SECONDS: u64 = 150;

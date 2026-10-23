@@ -69,6 +69,46 @@ pub fn is_six_digits(code: &str) -> bool {
     code.len() == DIGITS as usize && code.bytes().all(|byte| byte.is_ascii_digit())
 }
 
+/// 160 bits, the size RFC 4226 recommends for an HMAC-SHA1 secret.
+pub const SEED_BYTES: usize = 20;
+const BASE32_ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+const OTPAUTH_ISSUER: &str = "BrokerLogin";
+
+/// RFC 4648 base32 without padding, as authenticator apps expect.
+pub fn encode_base32(bytes: &[u8]) -> String {
+    let mut bits = 0u32;
+    let mut width = 0u32;
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(5) * 8);
+    for byte in bytes {
+        bits = (bits << 8) | u32::from(*byte);
+        width += 8;
+        while width >= 5 {
+            width -= 5;
+            encoded.push(BASE32_ALPHABET[((bits >> width) & 0x1f) as usize] as char);
+        }
+    }
+    if width > 0 {
+        encoded.push(BASE32_ALPHABET[((bits << (5 - width)) & 0x1f) as usize] as char);
+    }
+    encoded
+}
+
+pub fn generate_seed() -> Vec<u8> {
+    use aes_gcm::aead::OsRng;
+    use aes_gcm::aead::rand_core::RngCore;
+    let mut seed = vec![0u8; SEED_BYTES];
+    OsRng.fill_bytes(&mut seed);
+    seed
+}
+
+/// The URI an authenticator app or a trading engine's setup can import.
+pub fn otpauth_uri(alias: &str, seed: &[u8]) -> String {
+    format!(
+        "otpauth://totp/{OTPAUTH_ISSUER}:{alias}?secret={}&issuer={OTPAUTH_ISSUER}&algorithm=SHA1&digits={DIGITS}&period={STEP_SECONDS}",
+        encode_base32(seed)
+    )
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/otp.rs"]
 mod tests;
