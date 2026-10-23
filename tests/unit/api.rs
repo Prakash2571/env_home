@@ -622,6 +622,20 @@ async fn the_built_console_is_served_with_a_spa_fallback() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.as_str().unwrap().contains("<title>console</title>"));
+    let (_, headers, _) = call(&router, Request::get("/").body(Body::empty()).unwrap()).await;
+    assert_eq!(
+        headers["cache-control"], "no-cache",
+        "a deploy must reach browsers without a hard reload"
+    );
+    let (_, headers, _) = call(
+        &router,
+        Request::get("/health").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(
+        headers["cache-control"], "no-store",
+        "a route's own policy wins"
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 

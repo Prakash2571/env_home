@@ -34,11 +34,35 @@ describe("App", () => {
 
   it("lists configuration problems when the service is not configured", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-      respond(200, snapshot({ configured: false, problems: ["CBL_ACCOUNTS names no account"], accounts: [] })),
+      respond(200, snapshot({ configured: false, problems: ["CBL_ENCRYPTION_KEY is missing"], accounts: [] })),
     );
     render(<App />);
-    expect(await screen.findByText("CBL_ACCOUNTS names no account")).toBeInTheDocument();
+    expect(await screen.findByText("CBL_ENCRYPTION_KEY is missing")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Log in every account" })).toBeNull();
+  });
+
+  it("switches between logins and accounts, and remembers it in the address", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => respond(200, snapshot({ accounts: [] })));
+    window.history.replaceState(null, "", "/");
+    render(<App />);
+    const user = userEvent.setup();
+    expect(await screen.findByText("No Dhan account yet.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add an account" }));
+    expect(screen.getByRole("form", { name: "add a Dhan account" })).toBeInTheDocument();
+    expect(window.location.hash).toBe("#accounts");
+    expect(screen.getByRole("button", { name: "Accounts" })).toHaveAttribute("aria-current", "page");
+
+    await user.click(screen.getByRole("button", { name: "Logins" }));
+    expect(window.location.hash).toBe("");
+    expect(screen.queryByRole("form", { name: "add a Dhan account" })).toBeNull();
+
+    act(() => {
+      window.location.hash = "#accounts";
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    expect(screen.getByRole("form", { name: "add a Dhan account" })).toBeInTheDocument();
+    window.history.replaceState(null, "", "/");
   });
 
   it("asks the visitor to sign in when Access refuses", async () => {

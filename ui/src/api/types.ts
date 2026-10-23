@@ -22,7 +22,6 @@ export interface TokenView {
 export interface AccountView {
   alias: string;
   client_id_hint: string;
-  api_seed: "own" | "shared";
   phase: Phase;
   stages: StageView[];
   last_error: string | null;
@@ -82,6 +81,7 @@ export interface Snapshot {
   store: string | null;
   store_reachable: boolean;
   automation: boolean;
+  accounts_loaded: boolean;
   api_requires_access_jwt: boolean;
   window: WindowView | null;
   accounts: AccountView[];
@@ -89,4 +89,29 @@ export interface Snapshot {
   events: EventView[];
   requests: RequestRecord[];
   attempts: AttemptRecord[];
+}
+
+/** What the dashboard sends to add a Dhan account. Never stored in the page. */
+export interface AccountForm {
+  alias: string;
+  client_id: string;
+  api_key: string;
+  api_secret: string;
+  account_id: string;
+  pin: string;
+  dhan_totp_secret: string;
+}
+
+export type AccountField = keyof AccountForm;
+
+export interface FieldProblem {
+  field: AccountField;
+  message: string;
+}
+
+/** The token API seed, returned once when an account is added or re-keyed. */
+export interface AddedAccount {
+  alias: string;
+  token_api_seed: string;
+  otpauth_uri: string;
 }

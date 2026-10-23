@@ -184,6 +184,12 @@ pub fn router(context: Context, console: &Path) -> Router {
         .layer(header_layer(header::X_CONTENT_TYPE_OPTIONS, "nosniff"))
         .layer(header_layer(header::X_FRAME_OPTIONS, "DENY"))
         .layer(header_layer(header::REFERRER_POLICY, "no-referrer"))
+        // The console's index.html names the current build's assets: without
+        // this a browser keeps showing the previous release after a deploy.
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache"),
+        ))
         .layer(header_layer(
             header::CONTENT_SECURITY_POLICY,
             CONTENT_SECURITY_POLICY,

@@ -1,0 +1,192 @@
+/* The page switcher and the Accounts page: forms, the one-time seed, confirmations. */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin: 0 0 var(--gap);
+  border-bottom: 1px solid var(--rule);
+}
+
+.tab {
+  background: none;
+  color: var(--dim);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 8px 14px;
+  margin-bottom: -1px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab[aria-current="page"] {
+  color: var(--text);
+  border-bottom-color: var(--running);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--running);
+  outline-offset: -2px;
+}
+
+.accounts-page {
+  display: grid;
+  gap: var(--gap);
+}
+
+.empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  margin-bottom: var(--gap);
+}
+
+.empty p {
+  margin: 0;
+}
+
+.account-form > p {
+  margin: 0 0 var(--gap);
+  max-width: 70ch;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: var(--gap) 16px;
+  margin-bottom: var(--gap);
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field label,
+.confirm label {
+  font-size: var(--fs-label);
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.field input,
+.confirm input {
+  width: 100%;
+  min-width: 0;
+  background: var(--page);
+  color: var(--text);
+  border: 1px solid var(--faint);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: var(--fs-body);
+}
+
+.field input:focus-visible,
+.confirm input:focus-visible {
+  outline: 2px solid var(--running);
+  outline-offset: 1px;
+  border-color: var(--running);
+}
+
+.field input[aria-invalid="true"] {
+  border-color: var(--failed);
+}
+
+.field-note {
+  font-size: var(--fs-label);
+  overflow-wrap: anywhere;
+}
+
+.reveal {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--rule));
+  background: color-mix(in srgb, var(--warn) 6%, var(--panel));
+}
+
+.reveal > p {
+  margin: 0 0 var(--gap);
+  max-width: 70ch;
+}
+
+.reveal .seed {
+  font-size: var(--fs-lead);
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
+  user-select: all;
+  background: var(--page);
+  border: 1px solid var(--faint);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.reveal details {
+  margin-bottom: var(--gap);
+}
+
+.seed-uri {
+  margin: 6px 0 0;
+  font-size: var(--fs-label);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.accounts-table {
+  display: table;
+  min-width: 560px;
+}
+
+.accounts-table td {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.row-actions .action {
+  padding: 4px 10px;
+}
+
+.confirm-row td {
+  background: var(--nested);
+  padding: 10px;
+}
+
+.confirm-row p {
+  margin: 0 0 8px;
+}
+
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.confirm input {
+  width: auto;
+  flex: 1 1 160px;
+}
+
+.action.danger {
+  background: color-mix(in srgb, var(--failed) 20%, var(--nested));
+  border-color: color-mix(in srgb, var(--failed) 55%, var(--faint));
+}
+
+.action.danger:hover:not(:disabled) {
+  border-color: var(--failed);
+}

@@ -2,7 +2,7 @@ import type { AccountView, Drive, Phase } from "../api/types";
 import { ago, duration, istClock, istDate } from "../format";
 import { StageChain } from "./StageChain";
 
-const PHASE: Record<Phase, { label: string; tone: string }> = {
+export const PHASE: Record<Phase, { label: string; tone: string }> = {
   idle: { label: "no token yet", tone: "dim" },
   logging_in: { label: "logging in", tone: "running" },
   awaiting_callback: { label: "waiting for you", tone: "warn" },
@@ -56,7 +56,7 @@ export function AccountCard({ account, now, automation, busy, onLogin }: Account
         <div>
           <h2>{account.alias}</h2>
           <p className="muted mono">
-            client {account.client_id_hint} · API seed {account.api_seed}
+            client {account.client_id_hint}
           </p>
         </div>
         <span className={`pill tone-${phase.tone}`}>{phase.label}</span>

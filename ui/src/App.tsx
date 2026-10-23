@@ -3,6 +3,7 @@ import { requestLogin, testTelegram } from "./api/client";
 import type { Drive, Snapshot } from "./api/types";
 import { useSnapshot } from "./api/useSnapshot";
 import { AccountCard } from "./components/AccountCard";
+import { AccountsPage } from "./components/AccountsPage";
 import { AttemptLog, EventLog, RequestLog } from "./components/Logs";
 import { StatusStrip } from "./components/StatusStrip";
 
@@ -13,6 +14,31 @@ function useNow(): number {
     return () => window.clearInterval(timer);
   }, []);
   return now;
+}
+
+type View = "logins" | "accounts";
+
+const VIEWS: { view: View; label: string }[] = [
+  { view: "logins", label: "Logins" },
+  { view: "accounts", label: "Accounts" },
+];
+
+function viewFromHash(): View {
+  return window.location.hash === "#accounts" ? "accounts" : "logins";
+}
+
+function useView(): [View, (view: View) => void] {
+  const [view, setView] = useState<View>(viewFromHash);
+  useEffect(() => {
+    const follow = () => setView(viewFromHash());
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
+  }, []);
+  const show = (next: View) => {
+    setView(next);
+    window.history.replaceState(null, "", next === "accounts" ? "#accounts" : window.location.pathname);
+  };
+  return [view, show];
 }
 
 function Unconfigured({ snapshot }: { snapshot: Snapshot }) {
@@ -31,9 +57,53 @@ function Unconfigured({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
+interface LoginsProps {
+  snapshot: Snapshot;
+  now: number;
+  busy: boolean;
+  onLogin: (alias: string, drive: Drive) => void;
+  onAdd: () => void;
+}
+
+function Logins({ snapshot, now, busy, onLogin, onAdd }: LoginsProps) {
+  return (
+    <>
+      {snapshot.accounts.length === 0 ? (
+        <section className="panel empty" aria-label="no accounts">
+          <p>{snapshot.accounts_loaded ? "No Dhan account yet." : "Loading the stored accounts…"}</p>
+          {snapshot.accounts_loaded ? (
+            <button type="button" className="action primary" onClick={onAdd}>
+              Add an account
+            </button>
+          ) : null}
+        </section>
+      ) : (
+        <section className="cards" aria-label="accounts">
+          {snapshot.accounts.map((account) => (
+            <AccountCard
+              key={account.alias}
+              account={account}
+              now={now}
+              automation={snapshot.automation}
+              busy={busy}
+              onLogin={onLogin}
+            />
+          ))}
+        </section>
+      )}
+      <div className="grid">
+        <EventLog events={snapshot.events} />
+        <RequestLog requests={snapshot.requests} />
+      </div>
+      <AttemptLog attempts={snapshot.attempts} />
+    </>
+  );
+}
+
 export function App() {
   const { snapshot, link, error } = useSnapshot();
   const now = useNow();
+  const [view, show] = useView();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -105,23 +175,24 @@ export function App() {
             <Unconfigured snapshot={snapshot} />
           ) : (
             <>
-              <section className="cards" aria-label="accounts">
-                {snapshot.accounts.map((account) => (
-                  <AccountCard
-                    key={account.alias}
-                    account={account}
-                    now={now}
-                    automation={snapshot.automation}
-                    busy={busy}
-                    onLogin={onLogin}
-                  />
+              <nav className="tabs" aria-label="pages">
+                {VIEWS.map((tab) => (
+                  <button
+                    key={tab.view}
+                    type="button"
+                    className="tab"
+                    aria-current={view === tab.view ? "page" : undefined}
+                    onClick={() => show(tab.view)}
+                  >
+                    {tab.label}
+                  </button>
                 ))}
-              </section>
-              <div className="grid">
-                <EventLog events={snapshot.events} />
-                <RequestLog requests={snapshot.requests} />
-              </div>
-              <AttemptLog attempts={snapshot.attempts} />
+              </nav>
+              {view === "accounts" ? (
+                <AccountsPage accounts={snapshot.accounts} loaded={snapshot.accounts_loaded} now={now} />
+              ) : (
+                <Logins snapshot={snapshot} now={now} busy={busy} onLogin={onLogin} onAdd={() => show("accounts")} />
+              )}
             </>
           )}
           <footer className="muted mono foot">version {snapshot.version}</footer>

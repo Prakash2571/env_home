@@ -18,7 +18,6 @@ export function account(overrides: Partial<AccountView> = {}): AccountView {
   return {
     alias: "main",
     client_id_hint: "••••0001",
-    api_seed: "own",
     phase: "idle",
     stages: stages(),
     last_error: null,
@@ -39,6 +38,7 @@ export function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
     store: "postgres",
     store_reachable: true,
     automation: true,
+    accounts_loaded: true,
     api_requires_access_jwt: false,
     window: { label: "08:00-08:30 IST", open: false, opens_in: 3600, closes_in: 0 },
     accounts: [account()],
