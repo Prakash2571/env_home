@@ -17,7 +17,7 @@ Every attempt is written to `login_attempts`, whether it succeeded or failed, so
 
 ## The morning window
 
-- Default **08:00–08:30 IST, Monday to Friday** (`CBL_LOGIN_WINDOW`, `CBL_LOGIN_DAYS`). Dhan tokens last about 24 hours, so each account logs in once a morning.
+- Default **08:00–08:30 IST, Monday to Friday** (`CBL_LOGIN_WINDOW`, `CBL_LOGIN_DAYS`; `CBL_LOGIN_DAYS=everyday` logs in all seven days). Dhan tokens last about 24 hours, so each account logs in once a morning.
 - Inside the window, every account without a token **minted today** is logged in, **one after another**: the sidecar holds one browser at a time.
 - A failed account is retried every 60 s, **at most 5 times** a day. After the fifth failure one Telegram notice asks for a manual login.
 - A **hopeless** failure stops that account until tomorrow: an SMS OTP prompt (only a person can read it), a lockout ("too many attempts", "locked", "blocked"), or the consent cap spent. The card keeps the consent link so a person can finish.

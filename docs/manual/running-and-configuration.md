@@ -40,7 +40,7 @@ Every key is in both [config/env.example](../../config/env.example) and the depl
 | `DHAN_REDIRECT_URL` | yes | — | the public callback registered with every Dhan API app; its path becomes the route |
 | `CBL_SIDECAR_URL` | | — | e.g. `http://login:8090/login`; without it only manual logins work |
 | `CBL_LOGIN_WINDOW` | | `08:00-08:30` | IST |
-| `CBL_LOGIN_DAYS` | | `mon-fri` | lists and ranges: `mon,wed-fri` |
+| `CBL_LOGIN_DAYS` | | `mon-fri` | lists and ranges (`mon,wed-fri`), or `everyday`, `daily` or `all` for all seven days |
 | `CBL_HTTP_ADDR` | | `127.0.0.1:47440` | the image sets `0.0.0.0:47440` |
 | `CBL_HOME` | | `.` | the UI is served from `$CBL_HOME/ui/dist` |
 | `CBL_ACCESS_TEAM_DOMAIN` | with either Access check | — | `https://<team>.cloudflareaccess.com`; the JWT issuer and where its certs come from |

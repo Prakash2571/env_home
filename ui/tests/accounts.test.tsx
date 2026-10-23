@@ -87,9 +87,9 @@ describe("AccountsPage", () => {
     await user.click(screen.getByRole("button", { name: "Remove main" }));
     const confirm = screen.getByRole("button", { name: "Remove for good" });
     expect(confirm).toBeDisabled();
-    await user.type(screen.getByLabelText("Type main to confirm"), "mai");
+    await user.type(screen.getByLabelText(/to confirm/), "mai");
     expect(confirm).toBeDisabled();
-    await user.type(screen.getByLabelText("Type main to confirm"), "n");
+    await user.type(screen.getByLabelText(/to confirm/), "n");
     await user.click(confirm);
     expect(fetch).toHaveBeenCalledWith(
       "/api/accounts/main",
@@ -98,18 +98,38 @@ describe("AccountsPage", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("main removed");
   });
 
+  it("accepts the alias typed as the label shows it, in capitals or with a stray space", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(() => respond(200, { removed: "main" }));
+    render(<AccountsPage accounts={[account()]} loaded now={NOW} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Remove main" }));
+    const input = screen.getByLabelText(/to confirm/);
+    expect(input).toHaveAttribute("autocapitalize", "none");
+    expect(screen.getByText("main", { selector: "code" }), "the alias is shown as it is spelled").toBeInTheDocument();
+
+    await user.type(input, "mian");
+    expect(screen.getByText(/type the alias exactly/)).toBeInTheDocument();
+    await user.clear(input);
+    await user.type(input, " MAIN ");
+    await user.click(screen.getByRole("button", { name: "Remove for good" }));
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/accounts/main",
+      expect.objectContaining({ method: "DELETE", body: '{"confirm":"main"}' }),
+    );
+  });
+
   it("replaces a token API seed and shows the new one once", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(() => respond(200, { ...ADDED, alias: "main" }));
     render(<AccountsPage accounts={[account()]} loaded now={NOW} />);
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "New token seed for main" }));
-    await user.type(screen.getByLabelText("Type main to confirm"), "main");
+    await user.type(screen.getByLabelText(/to confirm/), "main");
     await user.click(screen.getByRole("button", { name: "Replace the seed" }));
     expect(await screen.findByRole("region", { name: "token API seed for main" })).toHaveTextContent(SEED);
 
     await user.click(screen.getByRole("button", { name: "New token seed for main" }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByLabelText("Type main to confirm")).toBeNull();
+    expect(screen.queryByLabelText(/to confirm/)).toBeNull();
   });
 });
 

@@ -33,36 +33,40 @@ interface ConfirmRowProps {
   onCancel: () => void;
 }
 
-function ConfirmRow({
-  pending,
-  working,
-  onConfirm,
-  onCancel,
-}: ConfirmRowProps) {
+/** Aliases are lower case, so capitals or stray spaces from a keyboard still match. */
+function normalise(typed: string): string {
+  return typed.trim().toLowerCase();
+}
+
+function ConfirmRow({ pending, working, onConfirm, onCancel }: ConfirmRowProps) {
   const [typed, setTyped] = useState("");
   const change = CHANGE[pending.change];
   const id = `confirm-${pending.alias}`;
+  const matches = normalise(typed) === pending.alias;
   return (
     <tr className="confirm-row">
       <td colSpan={5}>
         <p className="muted">{change.explain}</p>
         <div className="confirm">
-          <label htmlFor={id}>Type {pending.alias} to confirm</label>
+          <label htmlFor={id}>
+            Type <code className="confirm-alias">{pending.alias}</code> to confirm
+          </label>
           <input
             id={id}
             className="mono"
             autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
             spellCheck={false}
             value={typed}
+            aria-describedby={`${id}-hint`}
             onChange={(event) => setTyped(event.target.value)}
           />
           <button
             type="button"
-            className={
-              pending.change === "remove" ? "action danger" : "action primary"
-            }
-            disabled={working || typed !== pending.alias}
-            onClick={() => onConfirm(typed)}
+            className={pending.change === "remove" ? "action danger" : "action primary"}
+            disabled={working || !matches}
+            onClick={() => onConfirm(normalise(typed))}
           >
             {change.confirm}
           </button>
@@ -70,6 +74,9 @@ function ConfirmRow({
             Cancel
           </button>
         </div>
+        <p id={`${id}-hint`} className="field-note muted">
+          {typed === "" || matches ? "\u00a0" : `type the alias exactly: ${pending.alias}`}
+        </p>
       </td>
     </tr>
   );

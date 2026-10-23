@@ -153,7 +153,14 @@ fn day_index(name: &str) -> Result<usize> {
         .ok_or_else(|| anyhow::anyhow!("{name:?} is not a day of the week"))
 }
 
+/// Words that mean every day of the week, alone in CBL_LOGIN_DAYS.
+const EVERY_DAY: [&str; 4] = ["everyday", "every day", "daily", "all"];
+
 fn parse_days(value: &str) -> Result<[bool; 7]> {
+    let normalised = value.trim().to_ascii_lowercase();
+    if EVERY_DAY.contains(&normalised.as_str()) {
+        return Ok([true; 7]);
+    }
     let mut days = [false; 7];
     for part in value
         .split(',')

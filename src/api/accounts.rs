@@ -68,7 +68,9 @@ fn parse<T: for<'de> Deserialize<'de>>(body: &Bytes) -> Option<T> {
 fn confirmed(alias: &str, body: &Bytes) -> bool {
     parse::<Confirm>(body)
         .and_then(|body| body.confirm)
-        .is_some_and(|typed| typed.trim() == alias)
+        // Aliases are lower case; a capital from the label or a phone keyboard
+        // is the same alias, not a different one.
+        .is_some_and(|typed| typed.trim().to_ascii_lowercase() == alias)
 }
 
 fn who(email: Option<&String>) -> &str {

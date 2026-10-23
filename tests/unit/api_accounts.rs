@@ -202,11 +202,15 @@ async fn removing_needs_the_alias_typed_waits_for_a_login_and_stops_the_api_at_o
             &harness,
             "DELETE",
             "/api/accounts/main",
-            json!({"confirm": "main"}),
+            json!({"confirm": " MAIN "}),
         ),
     )
     .await;
-    assert_eq!((status, &body["removed"]), (StatusCode::OK, &json!("main")));
+    assert_eq!(
+        (status, &body["removed"]),
+        (StatusCode::OK, &json!("main")),
+        "capitals and stray spaces still confirm: aliases are lower case"
+    );
     assert!(
         state(&harness).await["accounts"]
             .as_array()

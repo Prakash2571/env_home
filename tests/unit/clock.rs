@@ -75,6 +75,30 @@ fn days_accept_lists_ranges_and_full_names() {
 }
 
 #[test]
+fn everyday_daily_and_all_mean_every_day_of_the_week() {
+    for every in [
+        "everyday",
+        "Everyday",
+        " daily ",
+        "ALL",
+        "every day",
+        "mon-sun",
+    ] {
+        let window = LoginWindow::parse("08:00-08:30", every).unwrap();
+        for day in 0..7 {
+            assert!(
+                window.is_login_day(at(day, 8, 0)),
+                "{every:?} skips day {day}"
+            );
+        }
+    }
+    assert!(
+        LoginWindow::parse("08:00-08:30", "everyday, mon").is_err(),
+        "a word for every day stands alone"
+    );
+}
+
+#[test]
 fn malformed_windows_and_days_are_refused() {
     assert!(LoginWindow::parse("0800-0830", "mon").is_err());
     assert!(LoginWindow::parse("08:30-08:00", "mon").is_err());

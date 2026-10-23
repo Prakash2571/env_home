@@ -177,6 +177,19 @@
   gap: 8px;
 }
 
+/* The alias keeps its own spelling inside the upper-cased label. */
+.confirm-alias {
+  font-family: var(--mono);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+  font-size: var(--fs-body);
+}
+
+.confirm-row .field-note {
+  margin: 6px 0 0;
+}
+
 .confirm input {
   width: auto;
   flex: 1 1 160px;
