@@ -15,6 +15,7 @@
 | A7 | Hardening against bots and crawlers is done **after** the code base is built (phase 6). | 2026-10-22 | checklist in [security.md](manual/security.md) |
 | A8 | The plan ([plan.md](plan.md)) is approved; D1–D9 stay open until the operator addresses them, and everything else is built. | 2026-10-22 | — |
 | A9 | Git commit bodies are the development log. | 2026-10-22 | in force |
+| A10 | (was D5) The subdomain is a **random 12-character name** under `beonedge.in`, so scanners and wordlists don't find it. Because this repository is public, **the name is never committed**: it lives only in the VPS `.env`, the tunnel config, the nginx site and Cloudflare DNS. Docs and files use `<subdomain>` or `__CBL_HOSTNAME__`. Obscurity only keeps crawlers away; Access and the TOTP gate remain the protection. | 2026-10-23 | `edge/` templates; see [deployment.md](manual/deployment.md) step 1 |
 
 ## Open
 
@@ -26,7 +27,6 @@ Each row says what the code does **meanwhile**. Every open decision is a configu
 | D2 | How many accounts, and does each have its own Dhan API app? | — | any number, via `CBL_ACCOUNTS`; each needs its own key and secret with the shared redirect URL |
 | D3 | One API TOTP seed per account, or one shared? | per account | **both work**: `TOKEN_API_<ALIAS>_TOTP_SECRET` wins, else `TOKEN_API_TOTP_SECRET`; the dashboard shows which each account uses |
 | D4 | Require a Cloudflare Access service token on `/api/v1` as well as the TOTP? | yes | off: `CBL_API_REQUIRE_ACCESS_JWT=false`. Meanwhile it is client ID + TOTP + per-source lockout + per-IP limit. Turned on, the app requires the Access JWT header to be **present**; Cloudflare verifies the token, and the app verifies the signature only from phase 6 |
-| D5 | The subdomain name | `login.beonedge.in` | placeholder `login.beonedge.in` in the examples; the code reads `DHAN_REDIRECT_URL` |
 | D6 | Which Google accounts may open the dashboard? | your own | Access policy decides; `CBL_ADMIN_EMAILS` empty means anyone Access admits |
 | D7 | Replace the legacy Next.js env store (Prakash's) on this branch? | yes, after a word with Prakash | **kept untouched** beside the new service; its CI job still runs; its README is in `docs/legacy/` |
 | D8 | Telegram: a new bot, or reuse `blackbox_trage`'s? | a new bot, same chat | any bot via `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`; without them, notices are skipped and shown as such |

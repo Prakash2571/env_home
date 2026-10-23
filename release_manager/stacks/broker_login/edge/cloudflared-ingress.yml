@@ -1,8 +1,9 @@
 # The rule to add to the beus tunnel's ~/.cloudflared/config.yml on the VPS,
 # ABOVE the final `- service: http_status:404`. The tunnel is locally managed,
 # so the dashboard cannot add it. See docs/manual/deployment.md, step 1.
+# __CBL_HOSTNAME__ is the subdomain (D5), kept out of this public repository.
 
   # Centralised broker login (env_home repo): host nginx vhost
   # /etc/nginx/sites-available/centralised-broker-login -> 127.0.0.1:47440.
-  - hostname: login.beonedge.in
+  - hostname: __CBL_HOSTNAME__
     service: http://localhost:80

@@ -90,7 +90,7 @@ async fn fetch_dhan_token(base: &str, client_id: &str, seed: &[u8]) -> anyhow::R
 
 ```bash
 CODE=$(oathtool --totp -b "$TOKEN_API_MAIN_TOTP_SECRET")
-curl --fail-with-body -sS -X POST https://login.beonedge.in/api/v1/token \
+curl --fail-with-body -sS -X POST https://<subdomain>.beonedge.in/api/v1/token \
   -H 'content-type: application/json' \
   -d "{\"client_id\":\"1100000001\",\"totp\":\"$CODE\"}"
 ```

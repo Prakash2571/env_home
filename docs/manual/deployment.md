@@ -26,25 +26,31 @@ Then run `./release_manager/status.sh` → Provision → Diagnose. It should rep
 
 ## Step 1: the subdomain and the tunnel (D5)
 
-The route follows every other `beonedge.in` site: tunnel → host nginx on `:80` → the app on `127.0.0.1:47440`. Both files are in [`release_manager/stacks/broker_login/edge/`](../../release_manager/stacks/broker_login/edge/). Replace `login` everywhere if D5 picks another name.
+The route follows every other `beonedge.in` site: tunnel → host nginx on `:80` → the app on `127.0.0.1:47440`. Both files are in [`release_manager/stacks/broker_login/edge/`](../../release_manager/stacks/broker_login/edge/), with `__CBL_HOSTNAME__` where the name goes.
 
-**1. The tunnel rule** (no sudo; the file belongs to `beonedge`). Back up `~/.cloudflared/config.yml`, then add the rule from `cloudflared-ingress.yml` **above** the final `- service: http_status:404`, and check it:
+**The name is not in this repository** (D5): the repository is public, and the subdomain is a random one so that scanners don't find it. It lives only in the VPS (`.env`, the tunnel config, the nginx site) and in Cloudflare DNS. Set it in your shell for the commands below, and never commit it:
+
+```bash
+CBL_HOST=<subdomain>.beonedge.in
+```
+
+**1. The tunnel rule** (no sudo; the file belongs to `beonedge`). Back up `~/.cloudflared/config.yml`, then add the rule from `cloudflared-ingress.yml` (with `__CBL_HOSTNAME__` replaced) **above** the final `- service: http_status:404`, and check it:
 
 ```bash
 ssh beonedge 'cp ~/.cloudflared/config.yml ~/.cloudflared/config.yml.bak-$(date +%Y%m%d-%H%M%S)'
-ssh beonedge 'cloudflared tunnel ingress validate && cloudflared tunnel ingress rule https://login.beonedge.in'
+ssh beonedge "cloudflared tunnel ingress validate && cloudflared tunnel ingress rule https://$CBL_HOST"
 ```
 
-**2. The DNS record** (no sudo; uses the tunnel's `cert.pem`). It creates the proxied `CNAME login → 34b2f8f4-….cfargotunnel.com`:
+**2. The DNS record** (no sudo; uses the tunnel's `cert.pem`). It creates the proxied CNAME to `34b2f8f4-….cfargotunnel.com`. Check the reply names `$CBL_HOST` exactly, not the name with another zone appended:
 
 ```bash
-ssh beonedge 'cloudflared tunnel route dns beus login.beonedge.in'
+ssh beonedge "cloudflared tunnel route dns beus $CBL_HOST"
 ```
 
 **3. The nginx site** (your sudo). It admits only `127.0.0.1` and `::1`, because the app trusts the Access identity header and nothing but cloudflared may bring one:
 
 ```bash
-scp release_manager/stacks/broker_login/edge/nginx-centralised-broker-login.conf beonedge:/tmp/
+sed "s/__CBL_HOSTNAME__/$CBL_HOST/" release_manager/stacks/broker_login/edge/nginx-centralised-broker-login.conf | ssh beonedge 'cat > /tmp/nginx-centralised-broker-login.conf'
 ssh -t beonedge 'sudo install -m 644 /tmp/nginx-centralised-broker-login.conf /etc/nginx/sites-available/centralised-broker-login && sudo ln -sfn /etc/nginx/sites-available/centralised-broker-login /etc/nginx/sites-enabled/centralised-broker-login && sudo nginx -t && sudo systemctl reload nginx'
 ```
 
@@ -54,7 +60,7 @@ ssh -t beonedge 'sudo install -m 644 /tmp/nginx-centralised-broker-login.conf /e
 ssh -t beonedge 'sudo systemctl restart cloudflared && systemctl is-active cloudflared'
 ```
 
-Until the app is deployed, `https://login.beonedge.in` answers 502 from nginx. **Create the Access applications (step 3) before the first deploy**, or the dashboard would be open to anyone. **Never** publish 47440 any other way.
+Until the app is deployed, `https://$CBL_HOST` answers 502 from nginx. **Create the Access applications (step 3) before the first deploy**, or the dashboard would be open to anyone. **Never** publish 47440 any other way.
 
 ## Step 2: Google sign-in (Google Cloud Console)
 
@@ -72,9 +78,9 @@ In **Zero Trust → Access → Applications → Add → Self-hosted**, create th
 
 | Name | Domain / path | Policy | Why |
 | --- | --- | --- | --- |
-| Broker Login | `login.beonedge.in` (whole host) | **Allow**, Include → Emails: your Google accounts (D6), login method Google | the dashboard and its API |
-| Broker Login — Dhan callback | `login.beonedge.in/dhan` | **Bypass**, Include → Everyone | Dhan's servers redirect the browser here and cannot sign in. Without this a manual login hangs. The route validates every callback itself. |
-| Broker Login — token API | `login.beonedge.in/api/v1` | **Service Auth**, Include → Service Token: one per trading engine (D4) | stops crawlers and scanners before they reach the TOTP gate. Each engine sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`. |
+| Broker Login | `<subdomain>.beonedge.in` (whole host) | **Allow**, Include → Emails: your Google accounts (D6), login method Google | the dashboard and its API |
+| Broker Login — Dhan callback | `<subdomain>.beonedge.in/dhan` | **Bypass**, Include → Everyone | Dhan's servers redirect the browser here and cannot sign in. Without this a manual login hangs. The route validates every callback itself. |
+| Broker Login — token API | `<subdomain>.beonedge.in/api/v1` | **Service Auth**, Include → Service Token: one per trading engine (D4) | stops crawlers and scanners before they reach the TOTP gate. Each engine sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`. |
 
 If D4 is decided **without** service tokens, make the third application **Bypass** instead. Then the TOTP gate, the lockout and the per-IP limit are the only protection, so add the Cloudflare rate limit in step 5.
 
@@ -82,7 +88,7 @@ Create a service token in **Access → Service Auth → Create Service Token**, 
 
 ## Step 4: Dhan
 
-For **each account**, in its Dhan web dashboard → *DhanHQ Trading APIs* → create (or edit) an API app with redirect URL `https://login.beonedge.in/dhan/callback`. The API key and secret go into `DHAN_<ALIAS>_API_KEY` and `_API_SECRET`. The account's authenticator seed (from enabling TOTP on Dhan) goes into `DHAN_<ALIAS>_TOTP_SECRET`.
+For **each account**, in its Dhan web dashboard → *DhanHQ Trading APIs* → create (or edit) an API app with redirect URL `https://<subdomain>.beonedge.in/dhan/callback`. The API key and secret go into `DHAN_<ALIAS>_API_KEY` and `_API_SECRET`. The account's authenticator seed (from enabling TOTP on Dhan) goes into `DHAN_<ALIAS>_TOTP_SECRET`.
 
 ## Step 5: Cloudflare hardening (phase 6, when you're ready)
 

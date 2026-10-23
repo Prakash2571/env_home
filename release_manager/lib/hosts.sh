@@ -40,7 +40,7 @@ host_attr() {
                 # deploys go over the private network only.
                 alias)  printf 'beonedge\n' ;;
                 label)  printf 'beonedge-vps\n' ;;
-                site)   printf 'login.beonedge.in (placeholder until the subdomain is chosen)\n' ;;
+                site)   printf 'a random beonedge.in subdomain (D5; on the VPS only, never in this repo)\n' ;;
                 paths)  printf 'paths.json\n' ;;
                 build)  printf 'broker_login\n' ;;
                 *) return 1 ;;
