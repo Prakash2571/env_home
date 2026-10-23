@@ -8,6 +8,8 @@ Opening the Cloudflare dashboard showed the VPS tunnel **beus** is locally manag
 
 D5 is decided (A10): a random 12-character subdomain. The repository is public, so the name is never committed; the `edge/` files carry `__CBL_HOSTNAME__`, and step 1 fills it in from `$CBL_HOST` at install time.
 
+**Step 1 done on the VPS (2026-10-23 14:45 IST):** tunnel rule added (backup `config.yml.bak-20261023-143824`) and validated, DNS routed, nginx site installed, cloudflared restarted. The first install answered 403 to everything: the box's `conf.d/boe-shared.conf` rewrites `$remote_addr` from `CF-Connecting-IP`, so the vhost now checks `$realip_remote_addr` (`b2afa07`). **Verified:** through Cloudflare the host answers 502 (nginx reached, no app yet); from the LAN and over Tailscale it answers 403, even with a forged `CF-Connecting-IP`; the five existing sites answer as before. **Still before the first deploy:** the Access applications (step 3).
+
 ## 2026-10-22 (evening): CI's first push of the branch
 
 The Rust job failed on its empty Postgres: two tests opened the store at once and raced on `CREATE TABLE IF NOT EXISTS`, so one start was refused. Local runs passed only because the database was already migrated. Two instances starting together on the VPS could hit the same race, so the fix is in the store, not the tests: all pending migrations now run in one transaction behind `pg_advisory_xact_lock`. A new test starts six stores together on an empty schema and fails without the lock. 127 Rust tests pass on a fresh database.
