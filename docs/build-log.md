@@ -8,7 +8,7 @@
 
 **Verified on the box:** `cbl-app`, `cbl-postgres` (healthy) and `cbl-login` up; migrations 1 and 2 applied; `/health` reports `ok` with no problems; 0 accounts loaded; the login window is the operator's 07:45-08:30. **Through Cloudflare:** `/` and `/health` go to the Access login; a real Google sign-in reached the dashboard, so the app verified the Access JWT against the live team certs; `/dhan/callback` reaches the app (410, nothing waiting); `/api/v1/token` without a service token gets 403 from Cloudflare; a LAN request faking `CF-Connecting-IP` gets 403 from nginx; `beonedge.in`, `app` and `beus` still answer 200.
 
-**Open:** Telegram answers "chat not found" (the bot cannot reach `TELEGRAM_CHAT_ID`: wrong ID, or the bot was never started in that chat or added to the group). Add the Dhan account on the Accounts page, store its token API seed, and run one manual login.
+**Telegram, fixed the same afternoon:** "chat not found" was a supergroup ID written without its leading minus. With `-100…` the bot (already a member of the alerts group) delivered the start-up notice after a reload and a dashboard test notice; the operator saw both arrive. **Open:** add the Dhan account on the Accounts page, store its token API seed, and run one manual login.
 
 ## 2026-10-23 (afternoon): the Accounts page and verified Access sign-ins
 
