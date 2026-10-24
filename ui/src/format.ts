@@ -29,3 +29,35 @@ export function ago(unix: number, now: number): string {
   const seconds = now - unix;
   return seconds < 5 ? "just now" : `${duration(seconds)} ago`;
 }
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "Today · 24 Oct", "Yesterday · 23 Oct", or "Wed 21 Oct", all in IST. */
+export function istDayLabel(unix: number, now: number): string {
+  const day = new Date((unix + IST_OFFSET_SECONDS) * 1000);
+  const short = `${day.getUTCDate()} ${MONTHS[day.getUTCMonth()]}`;
+  const date = istDate(unix);
+  if (date === istDate(now)) {
+    return `Today · ${short}`;
+  }
+  if (date === istDate(now - 86_400)) {
+    return `Yesterday · ${short}`;
+  }
+  return `${WEEKDAYS[day.getUTCDay()]} ${short}`;
+}
+
+/** Splits newest-first rows into IST days, keeping their order. */
+export function byIstDay<T>(rows: T[], at: (row: T) => number): { date: string; rows: T[] }[] {
+  const days: { date: string; rows: T[] }[] = [];
+  for (const row of rows) {
+    const date = istDate(at(row));
+    const last = days.at(-1);
+    if (last?.date === date) {
+      last.rows.push(row);
+    } else {
+      days.push({ date, rows: [row] });
+    }
+  }
+  return days;
+}

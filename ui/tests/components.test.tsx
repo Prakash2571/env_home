@@ -151,23 +151,62 @@ describe("StatusStrip", () => {
 
 describe("logs", () => {
   it("lists events, requests and attempts, and says when there are none", () => {
-    const { rerender } = render(<EventLog events={[]} />);
+    const { rerender } = render(<EventLog events={[]} now={NOW} />);
     expect(screen.getByText("Nothing has happened yet.")).toBeInTheDocument();
-    rerender(<EventLog events={[{ at: NOW, kind: "problem", alias: "main", message: "login failed" }]} />);
+    rerender(<EventLog events={[{ at: NOW, kind: "problem", alias: "main", message: "login failed" }]} now={NOW} />);
     expect(screen.getByText("login failed")).toBeInTheDocument();
 
     render(<RequestLog requests={[{ at: NOW, client_id: "1", alias: "main", ip: "203.0.113.7", outcome: "served", reason: "valid for 20h" }]} />);
     expect(screen.getByText("203.0.113.7")).toBeInTheDocument();
     expect(screen.getByText("served")).toHaveClass("tone-done");
 
-    render(<AttemptLog attempts={[{ alias: "main", drive: "scheduled", started_at: NOW, finished_at: NOW + 42, outcome: "failed", stage: "browser", detail: "Invalid TOTP", consent_spent: true }]} />);
+    render(<AttemptLog now={NOW} attempts={[{ alias: "main", drive: "scheduled", started_at: NOW, finished_at: NOW + 42, outcome: "failed", stage: "browser", detail: "Invalid TOTP", consent_spent: true }]} />);
     expect(screen.getByText("failed at browser")).toHaveClass("tone-failed");
     expect(screen.getByText("42s")).toBeInTheDocument();
   });
 
+  it("groups login attempts and activity by IST day, newest first", () => {
+    const attempt = (started_at: number, alias: string) => ({
+      alias,
+      drive: "scheduled",
+      started_at,
+      finished_at: started_at + 30,
+      outcome: "ok",
+      stage: "notified",
+      detail: "token stored",
+      consent_spent: true,
+    });
+    render(
+      <AttemptLog
+        now={NOW}
+        attempts={[attempt(NOW - 60, "today_one"), attempt(NOW - 86_400, "yesterday_one"), attempt(NOW - 3 * 86_400, "older_one")]}
+      />,
+    );
+    const table = screen.getByRole("table", { name: "login attempts by day" });
+    const headings = within(table).getAllByRole("rowheader").map((cell) => cell.textContent);
+    expect(headings[0]).toMatch(/^Today · /);
+    expect(headings[1]).toMatch(/^Yesterday · /);
+    expect(headings[2]).toMatch(/^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}$/);
+    expect(within(table).getAllByRole("row").map((row) => row.textContent)[2]).toContain("today_one");
+    expect(within(table).queryByText(/^\d\d-\d\d /), "inside a day only the time is shown").toBeNull();
+
+    render(
+      <EventLog
+        now={NOW}
+        events={[
+          { at: NOW - 30, kind: "api", alias: "main", message: "token served" },
+          { at: NOW - 86_400, kind: "login", alias: "main", message: "logged in" },
+        ]}
+      />,
+    );
+    const activity = screen.getByRole("region", { name: "activity" });
+    const days = within(activity).getAllByRole("heading", { level: 4 }).map((heading) => heading.textContent);
+    expect(days).toEqual([expect.stringMatching(/^Today · /), expect.stringMatching(/^Yesterday · /)]);
+  });
+
   it("says when no engine or login has run", () => {
     render(<RequestLog requests={[]} />);
-    render(<AttemptLog attempts={[]} />);
+    render(<AttemptLog attempts={[]} now={NOW} />);
     expect(screen.getByText("No engine has asked for a token yet.")).toBeInTheDocument();
     expect(screen.getByText("No login has run yet.")).toBeInTheDocument();
   });

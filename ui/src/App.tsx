@@ -95,11 +95,11 @@ function Logins({ snapshot, now, busy, onLogin, onAdd }: LoginsProps) {
           </section>
         </>
       )}
-      <div className="split">
-        <EventLog events={snapshot.events} />
+      <div className="logs">
         <RequestLog requests={snapshot.requests} />
+        <AttemptLog attempts={snapshot.attempts} now={now} />
+        <EventLog events={snapshot.events} now={now} />
       </div>
-      <AttemptLog attempts={snapshot.attempts} />
     </>
   );
 }
